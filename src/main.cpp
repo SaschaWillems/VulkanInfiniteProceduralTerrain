@@ -317,10 +317,6 @@ public:
 
 		profiling.drawBatchCpu.start();
 
-		float maxViewFullDist = 128.0f;
-		float maxViewDist = 512.0f;
-		float maxViewDistGrass = 256.0f;
-
 		uint32_t countFull = 0;
 		uint32_t countImpostor = 0;
 		uint32_t countGrass = 0;
@@ -344,11 +340,11 @@ public:
 					object.visible = true;
 					float d = glm::distance(object.worldpos, camera.position);
 					object.distance = d;
-					if (d < maxViewFullDist) {
+					if (d < heightMapSettings.maxDrawDistanceTreesFull) {
 						countFull++;
 					}
 					else {
-						if (d < maxViewDist) {
+						if (d < heightMapSettings.maxDrawDistanceTreesImposter) {
 							countImpostor++;
 						}
 					}
@@ -374,7 +370,7 @@ public:
 			if (terrainChunk->treeInstanceCount > 0) {
 				for (auto& object : terrainChunk->trees) {
 					if (object.visible) {
-						if (object.distance < maxViewFullDist) {
+						if (object.distance < heightMapSettings.maxDrawDistanceTreesFull) {
 							if (idxFull > countFull) {
 								continue;
 							}
@@ -382,10 +378,12 @@ public:
 							idTrees[idxFull].rotation = object.rotation;
 							idTrees[idxFull].scale = object.scale;
 							idTrees[idxFull].color = object.color;
+							// Fade in with terrain chunk
+							idTrees[idxFull].color.a = terrainChunk->alpha;
 							idxFull++;
 						}
 						else {
-							if (object.distance < maxViewDist) {
+							if (object.distance < heightMapSettings.maxDrawDistanceTreesImposter) {
 								if (idxFull > countImpostor) {
 									continue;
 								}
@@ -393,6 +391,8 @@ public:
 								idImpostors[idxImpostor].rotation = object.rotation;
 								idImpostors[idxImpostor].scale = object.scale * treeModelInfo[selectedTreeType].imposterScale;
 								idImpostors[idxImpostor].color = object.color;
+								// Fade in with terrain chunk
+								idImpostors[idxImpostor].color.a = terrainChunk->alpha;
 								idxImpostor++;
 							}
 						}

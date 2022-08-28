@@ -18,6 +18,13 @@ layout (set = 1, binding = 0) uniform SharedBlock { UBOShared ubo; };
 layout (set = 2, binding = 0) uniform ParamBlock { UBOParams params; };
 layout (set = 3, binding = 0) uniform UBOCSM { UBOShadowCascades uboCSM; };
 
+layout(push_constant) uniform PushConsts {
+	mat4 scale;
+	vec4 clipPlane;
+	uint shadows;
+	float alpha;
+} pushConsts;
+
 layout (location = 0) in vec2 inUV;
 layout (location = 1) in vec4 inPos;
 layout (location = 2) in vec3 inNormal;
@@ -82,4 +89,6 @@ void main()
 //	}
 //
 //	outFragColor = vec4(applyFog( texture(samplerReflection, vec2(projCoord)).rgb), 1.0);
+
+	outFragColor.a = clamp(pushConsts.alpha, 0.0, 1.0);
 }

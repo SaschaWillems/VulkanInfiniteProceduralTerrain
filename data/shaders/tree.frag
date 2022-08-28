@@ -78,4 +78,6 @@ void main(void)
 	float _MipScale = 0.25;
     outFragColor.a *= 1 + max(0, CalcMipLevel(inUV * texSize.xy)) * _MipScale;
 	outFragColor.a = (outFragColor.a - _Cutoff) / max(fwidth(outFragColor.a), 0.0001) + 0.5;
+
+	outFragColor.a *= inColor.a;
 }

@@ -46,6 +46,9 @@ public:
 	int grassDim = 175; // 256;
 	float grassScale = 0.5f; // @todo
 
+	float maxDrawDistanceTreesFull = 128.0f;
+	float maxDrawDistanceTreesImposter = 512.0f * 1.5f;
+
 	float waterPosition = 1.75f;
 
 	float maxChunkDrawDistance = 360.0f; // 460.0f; @todo
