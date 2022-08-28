@@ -17,8 +17,8 @@ This is a **personal playground** for an infinite procedurally generated terrain
 
 ## Videos
 
-https://www.youtube.com/watch?v=BpQpmBwpM78 (August 2022)
-https://www.youtube.com/watch?v=56WGJljkwuk (July 2022)
+* https://www.youtube.com/watch?v=BpQpmBwpM78 (August 2022)
+* https://www.youtube.com/watch?v=56WGJljkwuk (July 2022)
 
 ## Some technical background
 
