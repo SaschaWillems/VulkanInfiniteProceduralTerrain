@@ -739,15 +739,17 @@ public:
 		FrameObjects currentFrame = frameObjects[getCurrentFrameIndex()];
 
 		// Skysphere
-		vkCmdSetCullMode(cb->handle, drawType == SceneDrawType::sceneDrawTypeReflect ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_FRONT_BIT);
-		vkCmdSetCullMode(cb->handle, VK_CULL_MODE_NONE);
-		cb->bindPipeline(offscreen ? pipelines.skyOffscreen : pipelines.sky);
-		cb->bindDescriptorSets(pipelineLayouts.sky, { 
-			descriptorSets.skysphere,
-			frameObjects[currentFrameIndex].uniformBuffers.shared.descriptorSet },
-		0);
-		cb->updatePushConstant(pipelineLayouts.sky, 0, &pushConst);
-		models.skysphere.draw(cb->handle);
+		if (drawType != SceneDrawType::sceneDrawTypeRefract) {
+			vkCmdSetCullMode(cb->handle, drawType == SceneDrawType::sceneDrawTypeReflect ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_FRONT_BIT);
+			vkCmdSetCullMode(cb->handle, VK_CULL_MODE_NONE);
+			cb->bindPipeline(offscreen ? pipelines.skyOffscreen : pipelines.sky);
+			cb->bindDescriptorSets(pipelineLayouts.sky, {
+				descriptorSets.skysphere,
+				frameObjects[currentFrameIndex].uniformBuffers.shared.descriptorSet },
+				0);
+			cb->updatePushConstant(pipelineLayouts.sky, 0, &pushConst);
+			models.skysphere.draw(cb->handle);
+		}
 
 		// Terrain
 		// @todo: rework pipeline binding
