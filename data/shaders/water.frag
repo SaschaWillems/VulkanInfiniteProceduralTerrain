@@ -11,8 +11,9 @@
 
 layout (set = 0, binding = 0) uniform sampler2D samplerRefraction;
 layout (set = 0, binding = 1) uniform sampler2D samplerReflection;
-layout (set = 0, binding = 2) uniform sampler2D samplerWaterNormalMap;
-layout (set = 0, binding = 3) uniform sampler2DArray shadowMap;
+layout (set = 0, binding = 2) uniform sampler2D samplerRefractionDepth;
+layout (set = 0, binding = 3) uniform sampler2D samplerWaterNormalMap;
+layout (set = 0, binding = 4) uniform sampler2DArray shadowMap;
 
 layout (set = 1, binding = 0) uniform SharedBlock { UBOShared ubo; };
 layout (set = 2, binding = 0) uniform ParamBlock { UBOParams params; };
@@ -37,28 +38,29 @@ layout (location = 0) out vec4 outFragColor;
 #include "includes/fog.glsl"
 #include "includes/shadow.glsl"
 
+float LinearizeDepth(float depth)
+{
+  float n = 0.5;
+  float f = 1024.0;
+  float z = depth;
+  return (2.0 * n) / (f + n - z * (f - n));	
+}
+
 void main() 
 {
 	const vec4 tangent = vec4(1.0, 0.0, 0.0, 0.0);
 	const vec4 viewNormal = vec4(0.0, -1.0, 0.0, 0.0);
 	const vec4 bitangent = vec4(0.0, 0.0, 1.0, 0.0);
 	const float distortAmount = 0.05;
-
-	vec4 tmp = vec4(1.0 / inPos.w);
-	vec4 projCoord = inPos * tmp;
+	
+	// Convert to clip space
+//	vec4 projCoord = inPos / inPos.w;
+	vec2 projCoord = (inPos.xy / inPos.w) / 2.0 + 0.5;
 
 	// Scale and bias
-	projCoord += vec4(1.0);
-	projCoord *= vec4(0.5);
-
-	float t = clamp(ubo.time / 6., 0., 1.);
-
-	vec2 coords = projCoord.st;
-	vec2 dir = coords - vec2(.5);
-	
-	float dist = distance(coords, vec2(.5));
-	vec2 offset = dir * (sin(dist * 80. - ubo.time*15.) + .5) / 30.;
-
+//	projCoord += 1.0;
+//	projCoord *= 0.5;
+//
 	vec4 normal = texture(samplerWaterNormalMap, inUV * 8.0 + ubo.time);
 	normal = normalize(normal * 2.0 - 1.0);
 
@@ -69,17 +71,36 @@ void main()
 
 	vec4 dudv = normal * distortAmount;
 
+	//projCoord.xy += dudv.st;
+
+	//@todo: pass via uniform
+	const float near = 0.5;
+	const float far = 1024.0;
+
 	vec4 color = params.waterColor;
 	if (gl_FrontFacing) {
 		float shadow = 1.0;
 		if (params.shadows > 0) {
 			shadow = shadowMapping(dudv, inLPos, shadowMap);
 		}
-		vec4 refraction = texture(samplerRefraction, vec2(projCoord) + dudv.st);
-		vec4 reflection = texture(samplerReflection, vec2(projCoord) + dudv.st);
-		color *= mix(refraction, reflection, fresnel);
-		color *= shadow;
-//		color *= ambient * shadow;
+		vec4 refraction = texture(samplerRefraction, projCoord.xy);
+		vec4 reflection = texture(samplerReflection, projCoord.xy);
+		float rdepth = texture(samplerRefractionDepth, projCoord.xy).r;
+		// @todo: linear depth
+		float floorDistance = LinearizeDepth(rdepth);
+
+		float depth  = gl_FragCoord.z;
+		float waterDistance = LinearizeDepth(depth);
+
+		float waterDepth = floorDistance - waterDistance;
+
+		//(2.0 * near) / (far + near - depth * (far - near)); 
+		//floorDistance = 2.0 * near * far / (far + near - (2.0 * depth - 1.0) * (far - near));
+		color = mix(refraction, reflection, fresnel) * shadow;
+		//color.rgb = waterDepth.rrr * 50.0f;
+
+		color.a = waterDepth;
+
 	}
 
 //	if (params.fog == 1) {
@@ -87,8 +108,10 @@ void main()
 //	} else {
 //		outFragColor = color;
 //	}
-//
-//	outFragColor = vec4(applyFog( texture(samplerReflection, vec2(projCoord)).rgb), 1.0);
 
-	outFragColor.a = clamp(pushConsts.alpha, 0.0, 1.0);
+	if (params.fog == 1) {
+		outFragColor.a = clamp(color.a * params.waterAlpha * pushConsts.alpha, 0.0, 1.0);
+	} else {
+		outFragColor.a = clamp(pushConsts.alpha, 0.0, 1.0);
+	}
 }

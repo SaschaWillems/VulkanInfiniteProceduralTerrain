@@ -110,6 +110,7 @@ public:
 	struct {
 		Pipeline* debug;
 		Pipeline* water;
+		Pipeline* waterBlend;
 		Pipeline* waterOffscreen;
 		Pipeline* terrain;
 		Pipeline* terrainBlend;
@@ -163,7 +164,7 @@ public:
 	struct UniformDataParams {
 		uint32_t shadows = 0;
 		uint32_t fog = 1;
-		uint32_t _pad0; // @todo
+		float waterAlpha = 2048.0;
 		uint32_t shadowPCF = 1;
 		glm::vec4 fogColor;
 		glm::vec4 waterColor;
@@ -218,7 +219,7 @@ public:
 	};
 	struct OffscreenPass {
 		int32_t width, height;
-		OffscreenImage reflection, refraction, depth;
+		OffscreenImage reflection, refraction, depthReflection, depthRefraction;
 		VkSampler sampler;
 	} offscreenPass;
 
@@ -651,8 +652,8 @@ public:
 			break;
 		case ImageType::DepthStencil:
 			VkBool32 validDepthFormat = vks::tools::getSupportedDepthFormat(physicalDevice, &format);
-			usageFlags = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-			aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+			usageFlags = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+			aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;// | VK_IMAGE_ASPECT_STENCIL_BIT;
 			break;
 		}
 		assert(format != VK_FORMAT_UNDEFINED);
@@ -673,6 +674,23 @@ public:
 		target.view->create();
 
 		target.descriptor = { offscreenPass.sampler, target.view->handle, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+
+		if (type == ImageType::DepthStencil) {
+			target.descriptor.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+		}
+	}
+
+	void setObjectName(VkObjectType object_type, uint64_t object_handle, const char* object_name)
+	{
+		if (vkSetDebugUtilsObjectNameEXT == nullptr) {
+			vkSetDebugUtilsObjectNameEXT = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(vkGetInstanceProcAddr(instance, "vkSetDebugUtilsObjectNameEXT"));
+		}
+
+		VkDebugUtilsObjectNameInfoEXT name_info = { VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT };
+		name_info.objectType = object_type;
+		name_info.objectHandle = object_handle;
+		name_info.pObjectName = object_name;
+		vkSetDebugUtilsObjectNameEXT(device, &name_info);
 	}
 
 	// Setup the offscreen images for rendering reflection and refractions
@@ -684,7 +702,7 @@ public:
 		// Find a suitable depth format
 		VkFormat fbDepthFormat;
 		VkBool32 validDepthFormat = vks::tools::getSupportedDepthFormat(physicalDevice, &fbDepthFormat);
-		assert(validDepthFormat);		
+		assert(validDepthFormat);
 
 		VkSamplerCreateInfo samplerInfo = vks::initializers::samplerCreateInfo();
 		samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -702,8 +720,16 @@ public:
 
 		createImage(offscreenPass.refraction, ImageType::Color);
 		createImage(offscreenPass.reflection, ImageType::Color);
-		createImage(offscreenPass.depth, ImageType::DepthStencil);
-	}
+		createImage(offscreenPass.depthRefraction, ImageType::DepthStencil);
+		createImage(offscreenPass.depthReflection, ImageType::DepthStencil);
+
+		VkCommandBuffer cb = VulkanContext::device->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+		vks::tools::setImageLayout(cb, offscreenPass.reflection.image->handle, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
+		vks::tools::setImageLayout(cb, offscreenPass.refraction.image->handle, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
+		vks::tools::setImageLayout(cb, offscreenPass.depthReflection.image->handle, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 });
+		vks::tools::setImageLayout(cb, offscreenPass.depthRefraction.image->handle, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 });
+		VulkanContext::device->flushCommandBuffer(cb, queue);
+	}		
 
 	void drawScene(CommandBuffer* cb, SceneDrawType drawType)
 	{
@@ -724,11 +750,11 @@ public:
 
 		switch (drawType) {
 		case SceneDrawType::sceneDrawTypeRefract:
-			pushConst.clipPlane = glm::vec4(0.0f, 1.0f, 0.0f, heightMapSettings.waterPosition);
+			pushConst.clipPlane = glm::vec4(0.0f, 1.0f, 0.0f, heightMapSettings.waterPosition + 0.1f);
 			pushConst.shadows = 0;
 			break;
 		case SceneDrawType::sceneDrawTypeReflect:
-			pushConst.clipPlane = glm::vec4(0.0f, 1.0f, 0.0f, heightMapSettings.waterPosition);
+			pushConst.clipPlane = glm::vec4(0.0f, 1.0f, 0.0f, heightMapSettings.waterPosition + 0.1f);
 			pushConst.shadows = 0;
 			break;
 		}
@@ -795,7 +821,7 @@ public:
 				frameObjects[currentFrameIndex].uniformBuffers.params.descriptorSet,
 				frameObjects[currentFrameIndex].uniformBuffers.CSM.descriptorSet }, 
 			0);
-			cb->bindPipeline(offscreen ? pipelines.waterOffscreen : pipelines.water);
+			cb->bindPipeline(offscreen ? pipelines.waterOffscreen : (waterBlending ? pipelines.waterBlend : pipelines.water));
 			for (auto& terrainChunk : infiniteTerrain.terrainChunks) {
 				if (terrainChunk->visible && (terrainChunk->state == TerrainChunk::State::generated)) {
 					pushConst.alpha = terrainChunk->alpha;
@@ -1239,6 +1265,7 @@ public:
 		descriptorSetLayouts.water->addBinding(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT);
 		descriptorSetLayouts.water->addBinding(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT);
 		descriptorSetLayouts.water->addBinding(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT);
+		descriptorSetLayouts.water->addBinding(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT);
 		descriptorSetLayouts.water->create();
 
 		pipelineLayouts.water = new PipelineLayout(device);
@@ -1309,7 +1336,8 @@ public:
 
 	void setupDescriptorSet()
 	{
-		VkDescriptorImageInfo depthMapDescriptor = vks::initializers::descriptorImageInfo(depth.sampler, depth.view->handle, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+		VkDescriptorImageInfo shadowMapDescriptor = vks::initializers::descriptorImageInfo(depth.sampler, depth.view->handle, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+		VkDescriptorImageInfo depthRefractionDescriptor = vks::initializers::descriptorImageInfo(offscreenPass.sampler, offscreenPass.depthRefraction.view->handle, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
 
 		// Water plane
 		descriptorSets.waterplane = new DescriptorSet(device);
@@ -1317,8 +1345,9 @@ public:
 		descriptorSets.waterplane->addLayout(descriptorSetLayouts.water);
 		descriptorSets.waterplane->addDescriptor(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &offscreenPass.refraction.descriptor);
 		descriptorSets.waterplane->addDescriptor(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &offscreenPass.reflection.descriptor);
-		descriptorSets.waterplane->addDescriptor(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &textures.waterNormalMap.descriptor);
-		descriptorSets.waterplane->addDescriptor(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &depthMapDescriptor);
+		descriptorSets.waterplane->addDescriptor(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &offscreenPass.depthRefraction.descriptor);
+		descriptorSets.waterplane->addDescriptor(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &textures.waterNormalMap.descriptor);
+		descriptorSets.waterplane->addDescriptor(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &shadowMapDescriptor);
 		//@todo
 		//descriptorSets.waterplane->addDescriptor(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &uniformBuffers.vsShared.descriptor);
 		//descriptorSets.waterplane->addDescriptor(5, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &uniformBuffers.CSM.descriptor);
@@ -1328,8 +1357,8 @@ public:
 		descriptorSets.debugquad = new DescriptorSet(device);
 		descriptorSets.debugquad->setPool(descriptorPool);
 		descriptorSets.debugquad->addLayout(descriptorSetLayouts.textured);
-		descriptorSets.debugquad->addDescriptor(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &offscreenPass.reflection.descriptor);
-		descriptorSets.debugquad->addDescriptor(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &offscreenPass.refraction.descriptor);
+		descriptorSets.debugquad->addDescriptor(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &offscreenPass.depthReflection.descriptor);
+		descriptorSets.debugquad->addDescriptor(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &offscreenPass.depthRefraction.descriptor); // @todo
 		descriptorSets.debugquad->create();
 
 		// Terrain
@@ -1337,7 +1366,7 @@ public:
 		descriptorSets.terrain->setPool(descriptorPool);
 		descriptorSets.terrain->addLayout(descriptorSetLayouts.terrain);
 		descriptorSets.terrain->addDescriptor(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &textures.terrainArray.descriptor);
-		descriptorSets.terrain->addDescriptor(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &depthMapDescriptor);
+		descriptorSets.terrain->addDescriptor(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &shadowMapDescriptor);
 		descriptorSets.terrain->create();
 
 		// Skysphere
@@ -1351,14 +1380,14 @@ public:
 		cascadeDebug.descriptorSet = new DescriptorSet(device);
 		cascadeDebug.descriptorSet->setPool(descriptorPool);
 		cascadeDebug.descriptorSet->addLayout(cascadeDebug.descriptorSetLayout);
-		cascadeDebug.descriptorSet->addDescriptor(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &depthMapDescriptor);
+		cascadeDebug.descriptorSet->addDescriptor(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &shadowMapDescriptor);
 		cascadeDebug.descriptorSet->create();
 
 		// Shadow cascades
 		descriptorSets.shadowCascades = new DescriptorSet(device);
 		descriptorSets.shadowCascades->setPool(descriptorPool);
 		descriptorSets.shadowCascades->addLayout(descriptorSetLayouts.shadowCascades);
-		descriptorSets.shadowCascades->addDescriptor(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &depthMapDescriptor);
+		descriptorSets.shadowCascades->addDescriptor(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &shadowMapDescriptor);
 		descriptorSets.shadowCascades->create();
 	}
 
@@ -1494,6 +1523,27 @@ public:
 		pipelines.water->addShader(getAssetPath() + "shaders/water.frag.spv");
 		pipelines.water->setpNext(&pipelineRenderingCreateInfo);
 		pipelines.water->create();
+
+		blendAttachmentState.blendEnable = VK_TRUE;
+		blendAttachmentState.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+		blendAttachmentState.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+		blendAttachmentState.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		blendAttachmentState.colorBlendOp = VK_BLEND_OP_ADD;
+		blendAttachmentState.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		blendAttachmentState.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+		blendAttachmentState.alphaBlendOp = VK_BLEND_OP_ADD;
+
+		pipelines.waterBlend = new Pipeline(device);
+		pipelines.waterBlend->setCreateInfo(pipelineCI);
+		pipelines.waterBlend->setSampleCount(settings.multiSampling ? settings.sampleCount : VK_SAMPLE_COUNT_1_BIT);
+		pipelines.waterBlend->setVertexInputState(vertexInputStateModel);
+		pipelines.waterBlend->setCache(pipelineCache);
+		pipelines.waterBlend->setLayout(pipelineLayouts.water);
+		pipelines.waterBlend->addShader(getAssetPath() + "shaders/water.vert.spv");
+		pipelines.waterBlend->addShader(getAssetPath() + "shaders/water.frag.spv");
+		pipelines.waterBlend->setpNext(&pipelineRenderingCreateInfo);
+		pipelines.waterBlend->create();
+
 		// Offscreen
 		pipelines.waterOffscreen = new Pipeline(device);
 		pipelines.waterOffscreen->setCreateInfo(pipelineCI);
@@ -1633,17 +1683,16 @@ public:
 		pipelines.grassOffscreen->setpNext(&pipelineRenderingCreateInfo);
 		pipelines.grassOffscreen->create();
 
+		// Shadow map depth pass
 		depthStencilState.depthWriteEnable = VK_TRUE;
 		blendAttachmentState.blendEnable = VK_FALSE;
-
 		multisampleState.alphaToCoverageEnable = VK_FALSE;
-
-		// Shadow map depth pass
 
 		VkPipelineRenderingCreateInfo pipelineRenderingCreateInfoDepthPass{};
 		pipelineRenderingCreateInfoDepthPass.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
 		pipelineRenderingCreateInfoDepthPass.depthAttachmentFormat = depthFormat;
 		pipelineRenderingCreateInfoDepthPass.stencilAttachmentFormat = depthFormat;
+		// Use multi view to generate all shadow map cascades in a single pass
 		pipelineRenderingCreateInfoDepthPass.viewMask = 0b00001111;
 
 		colorBlendState.attachmentCount = 0;
@@ -1694,9 +1743,6 @@ public:
 			frame.uniformBuffers.CSM.createDescriptorSet(descriptorPool, descriptorSetLayouts.ubo);
 			frame.uniformBuffers.params.createDescriptorSet(descriptorPool, descriptorSetLayouts.ubo);
 			frame.uniformBuffers.depthPass.createDescriptorSet(descriptorPool, descriptorSetLayouts.ubo);
-
-			updateUniformBuffers();
-			updateUniformParams();
 		}
 
 		std::vector<DrawBatch*> batches = { &drawBatches.trees, &drawBatches.treeImpostors, &drawBatches.grass };
@@ -1842,7 +1888,7 @@ public:
 		// When both are specified separately, the only requirement is that the image view is identical.			
 		VkRenderingAttachmentInfo depthStencilAttachment{};
 		depthStencilAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
-		depthStencilAttachment.imageView = offscreenPass.depth.view->handle;
+		depthStencilAttachment.imageView = offscreenPass.depthRefraction.view->handle;
 		depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL_KHR;
 		depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1864,7 +1910,7 @@ public:
 			offscreenPass.reflection.image->handle,
 			0,
 			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-			VK_IMAGE_LAYOUT_UNDEFINED,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
 			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -1874,29 +1920,43 @@ public:
 			offscreenPass.refraction.image->handle,
 			0,
 			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-			VK_IMAGE_LAYOUT_UNDEFINED,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
 			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 			VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
-		vks::tools::insertImageMemoryBarrier(
-			cb->handle,
-			offscreenPass.depth.image->handle,
-			0,
-			VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-			VK_IMAGE_LAYOUT_UNDEFINED,
-			VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-			VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-			VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-			VkImageSubresourceRange{ VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 });
+		//vks::tools::insertImageMemoryBarrier(
+		//	cb->handle,
+		//	offscreenPass.depthRefraction.image->handle,
+		//	0,
+		//	VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+		//	VK_IMAGE_LAYOUT_UNDEFINED,
+		//	VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+		//	VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+		//	VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+		//	VkImageSubresourceRange{ VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 });
+		//vks::tools::insertImageMemoryBarrier(
+		//	cb->handle,
+		//	offscreenPass.depthReflection.image->handle,
+		//	0,
+		//	VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+		//	VK_IMAGE_LAYOUT_UNDEFINED,
+		//	VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+		//	VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+		//	VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+		//	VkImageSubresourceRange{ VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 });
+
+		//vks::tools::setImageLayout(cb->handle, offscreenPass.depthRefraction.image->handle, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 });
+
 
 		// Refraction
+		vks::tools::setImageLayout(cb->handle, offscreenPass.depthRefraction.image->handle, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 });
 		vkCmdBeginRendering(cb->handle, &renderingInfo);
 		cb->setViewport(0.0f, 0.0f, (float)offscreenPass.width, (float)offscreenPass.height, 0.0f, 1.0f);
 		cb->setScissor(0, 0, offscreenPass.width, offscreenPass.height);
 		drawScene(cb, SceneDrawType::sceneDrawTypeRefract);
 		vkCmdEndRendering(cb->handle);
-
+		vks::tools::setImageLayout(cb->handle, offscreenPass.depthRefraction.image->handle, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 });
 
 		// New structures are used to define the attachments used in dynamic rendering
 		colorAttachment = {};
@@ -1911,7 +1971,7 @@ public:
 		// When both are specified separately, the only requirement is that the image view is identical.			
 		depthStencilAttachment = {};
 		depthStencilAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
-		depthStencilAttachment.imageView = offscreenPass.depth.view->handle;
+		depthStencilAttachment.imageView = offscreenPass.depthReflection.view->handle;
 		depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL_KHR;
 		depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1927,11 +1987,13 @@ public:
 		renderingInfo.pStencilAttachment = &depthStencilAttachment;
 
 		// Reflection
+		vks::tools::setImageLayout(cb->handle, offscreenPass.depthReflection.image->handle, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 });
 		vkCmdBeginRendering(cb->handle, &renderingInfo);
 		cb->setViewport(0.0f, 0.0f, (float)offscreenPass.width, (float)offscreenPass.height, 0.0f, 1.0f);
 		cb->setScissor(0, 0, offscreenPass.width, offscreenPass.height);
 		drawScene(cb, SceneDrawType::sceneDrawTypeReflect);
 		vkCmdEndRendering(cb->handle);
+		vks::tools::setImageLayout(cb->handle, offscreenPass.depthReflection.image->handle, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 });
 
 		vks::tools::setImageLayout(cb->handle, offscreenPass.reflection.image->handle, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
 		vks::tools::setImageLayout(cb->handle, offscreenPass.refraction.image->handle, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
@@ -2024,7 +2086,7 @@ public:
 
 		if (debugDisplayReflection) {
 			uint32_t val0 = 0;
-			cb->bindDescriptorSets(pipelineLayouts.textured, { descriptorSets.debugquad }, 0);
+			cb->bindDescriptorSets(pipelineLayouts.debug, { descriptorSets.debugquad }, 0);
 			cb->bindPipeline(pipelines.debug);
 			cb->updatePushConstant(pipelineLayouts.debug, 0, &val0);
 			cb->draw(6, 1, 0, 0);
@@ -2032,7 +2094,7 @@ public:
 
 		if (debugDisplayRefraction) {
 			uint32_t val1 = 1;
-			cb->bindDescriptorSets(pipelineLayouts.textured, { descriptorSets.debugquad }, 0);
+			cb->bindDescriptorSets(pipelineLayouts.debug, { descriptorSets.debugquad }, 0);
 			cb->bindPipeline(pipelines.debug);
 			cb->updatePushConstant(pipelineLayouts.debug, 0, &val1);
 			cb->draw(6, 1, 0, 0);
@@ -2048,15 +2110,6 @@ public:
 		if (UIOverlay.visible) {
 			UIOverlay.draw(cb->handle, getCurrentFrameIndex());
 		}
-
-		VkImageResolve imageResolve{
-			// mip level 0, layerbase 0, layer count 1
-			{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-			{0, 0, 0},
-			{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-			{0, 0, 0},
-			{ width, height, 1 },
-		};
 
 		vkCmdEndRendering(cb->handle);
 
