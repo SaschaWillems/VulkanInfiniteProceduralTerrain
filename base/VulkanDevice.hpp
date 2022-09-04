@@ -30,7 +30,10 @@ namespace vks
 		/** @brief Features of the physical device that an application can use to check if a feature is supported */
 		VkPhysicalDeviceFeatures features;
 		/** @brief Features that have been enabled for use on the physical device */
-		VkPhysicalDeviceFeatures2 enabledFeatures;
+		inline static VkPhysicalDeviceFeatures enabledFeatures = {};
+		inline static VkPhysicalDeviceVulkan11Features enabledFeatures11 = {};
+		inline static VkPhysicalDeviceVulkan12Features enabledFeatures12 = {};
+		inline static VkPhysicalDeviceVulkan13Features enabledFeatures13 = {};
 		/** @brief Memory types and heaps of the physical device */
 		VkPhysicalDeviceMemoryProperties memoryProperties;
 		/** @brief Queue family properties of the physical device */
@@ -215,7 +218,7 @@ namespace vks
 		*
 		* @return VkResult of the device creation call
 		*/
-		VkResult createLogicalDevice(VkPhysicalDeviceFeatures2 enabledFeatures, std::vector<const char*> enabledExtensions, void* pNextChain, bool useSwapChain = true, VkQueueFlags requestedQueueTypes = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT)
+		VkResult createLogicalDevice(std::vector<const char*> enabledExtensions, void* pNextChain, bool useSwapChain = true, VkQueueFlags requestedQueueTypes = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT)
 		{			
 			// Desired queues need to be requested upon logical device creation
 			// Due to differing queue family configurations of Vulkan implementations this can be a bit tricky, especially if the application
@@ -298,18 +301,14 @@ namespace vks
 			deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 			deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());;
 			deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
-			deviceCreateInfo.pNext = &enabledFeatures;
-			//deviceCreateInfo.pEnabledFeatures = &enabledFeatures;
-		
-			// If a pNext(Chain) has been passed, we need to add it to the device creation info
-			if (pNextChain) {
-				VkPhysicalDeviceFeatures2 physicalDeviceFeatures2 = enabledFeatures;
-				physicalDeviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-				//physicalDeviceFeatures2.features = enabledFeatures;
-				physicalDeviceFeatures2.pNext = pNextChain;
-				deviceCreateInfo.pEnabledFeatures = nullptr;
-				deviceCreateInfo.pNext = &physicalDeviceFeatures2;
-			}
+			deviceCreateInfo.pEnabledFeatures = &vks::VulkanDevice::enabledFeatures;
+
+			vks::VulkanDevice::enabledFeatures11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+			vks::VulkanDevice::enabledFeatures12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+			vks::VulkanDevice::enabledFeatures13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+			vks::VulkanDevice::enabledFeatures11.pNext = &vks::VulkanDevice::enabledFeatures12;
+			vks::VulkanDevice::enabledFeatures12.pNext = &vks::VulkanDevice::enabledFeatures13;
+			deviceCreateInfo.pNext = &VulkanDevice::enabledFeatures11;
 
 			// Enable the debug marker extension if it is present (likely meaning a debugging tool is present)
 			if (extensionSupported(VK_EXT_DEBUG_MARKER_EXTENSION_NAME))
@@ -337,7 +336,7 @@ namespace vks
 				}
 			}
 
-			this->enabledFeatures = enabledFeatures;
+			//this->enabledFeatures = enabledFeatures;
 
 			return result;
 		}

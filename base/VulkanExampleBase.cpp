@@ -782,8 +782,6 @@ VulkanExampleBase::VulkanExampleBase(bool enableValidation)
 	}
 	setupDPIAwareness();
 #endif
-
-	enabledFeatures11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
 }
 
 VulkanExampleBase::~VulkanExampleBase()
@@ -965,11 +963,7 @@ bool VulkanExampleBase::initVulkan()
 	// This is handled by a separate class that gets a logical device representation
 	// and encapsulates functions related to a device
 	vulkanDevice = new vks::VulkanDevice(physicalDevice);
-	VkPhysicalDeviceFeatures2 pdf2{};
-	pdf2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-	pdf2.features = enabledFeatures;
-	pdf2.pNext = &enabledFeatures11;
-	VkResult res = vulkanDevice->createLogicalDevice(pdf2, enabledDeviceExtensions, deviceCreatepNextChain);
+	VkResult res = vulkanDevice->createLogicalDevice(enabledDeviceExtensions, deviceCreatepNextChain);
 	if (res != VK_SUCCESS) {
 		vks::tools::exitFatal("Could not create Vulkan device: \n" + vks::tools::errorString(res), res);
 		return false;

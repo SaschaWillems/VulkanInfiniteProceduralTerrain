@@ -590,12 +590,13 @@ public:
 		camera.update(0.0f);
 		frustum.update(camera.matrices.perspective * camera.matrices.view);
 
-		// The scene shader uses a clipping plane, so this feature has to be enabled
-		enabledFeatures.shaderClipDistance = VK_TRUE;
-		enabledFeatures.samplerAnisotropy = VK_TRUE;
-		enabledFeatures.depthClamp = VK_TRUE;
-		enabledFeatures.fillModeNonSolid = VK_TRUE;
-		enabledFeatures11.multiview = VK_TRUE;
+		vks::VulkanDevice::enabledFeatures.shaderClipDistance = VK_TRUE;
+		vks::VulkanDevice::enabledFeatures.samplerAnisotropy = VK_TRUE;
+		vks::VulkanDevice::enabledFeatures.depthClamp = VK_TRUE;
+		vks::VulkanDevice::enabledFeatures.fillModeNonSolid = VK_TRUE;
+
+		vks::VulkanDevice::enabledFeatures11.multiview = VK_TRUE;
+		vks::VulkanDevice::enabledFeatures13.dynamicRendering = VK_TRUE;
 
 		apiVersion = VK_API_VERSION_1_3;
 		enabledDeviceExtensions.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
