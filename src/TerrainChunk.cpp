@@ -10,6 +10,7 @@
 
 TerrainChunk::TerrainChunk(glm::ivec2 coords, int size) : size(size) {
 		position = coords;
+		worldPosition = glm::vec2(position.x * (float)(vks::HeightMap::chunkSize - 1) - (float)(vks::HeightMap::chunkSize - 1) / 2.0f, position.y* (float)(vks::HeightMap::chunkSize - 1) - (float)(vks::HeightMap::chunkSize - 1) / -2.0f);
 		center = glm::vec3(0.0f);
 		center.x = (float)coords.x * (float)size;
 		center.z = (float)coords.y * (float)size;

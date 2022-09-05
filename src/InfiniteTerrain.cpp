@@ -59,25 +59,14 @@ TerrainChunk* InfiniteTerrain::getChunkFromWorldPos(glm::vec3 coords)
 	return nullptr;
 }
 
-bool InfiniteTerrain::getHeightAndRandomValue(const glm::vec3 worldPos, float& height, float& randomValue)
+bool InfiniteTerrain::getHeight(const glm::vec3 worldPos, float& height)
 {
 	// @todo: skip chunks that are too far away?
 	const int chunkCoordX = round(worldPos.x / (float)(heightMapSettings.mapChunkSize - 1));
 	const int chunkCoordY = round(worldPos.z / (float)(heightMapSettings.mapChunkSize - 1));
 	for (auto& chunk : terrainChunks) {
-		if (chunk->position.x == chunkCoordX && chunk->position.y == chunkCoordY) {
-			const float topLeftX = (chunk->position.x * (float)(vks::HeightMap::chunkSize - 1)) - (float)(vks::HeightMap::chunkSize - 1) / 2.0f;
-			const float topLeftZ = (chunk->position.y * (float)(vks::HeightMap::chunkSize - 1)) - (float)(vks::HeightMap::chunkSize - 1) / -2.0f;
-			int terrainX = round(worldPos.x - topLeftX) + 1;
-			int terrainY = -round(worldPos.z - topLeftZ) + 1;
-			//float h0 = chunk->getHeight(terrainX, terrainY);
-			//float h1 = chunk->getHeight(terrainX - 2, terrainY);
-			//float h2 = chunk->getHeight(terrainX + 2, terrainY);
-			//float h3 = chunk->getHeight(terrainX, terrainY - 2);
-			//float h4 = chunk->getHeight(terrainX, terrainY + 2);
-			//float h = (h0 + h1 + h2 + h3 + h4) / 5.0f;
-			height = -chunk->getHeight(terrainX, terrainY);
-			//randomValue = chunk->getRandomValue(round(worldPos.x - topLeftX) + 0.5f, -round(worldPos.z - topLeftZ) + 0.5f);
+		if (chunk->visible && (chunk->position.x == chunkCoordX) && (chunk->position.y == chunkCoordY)) {
+			height = -chunk->getHeight(round(worldPos.x - chunk->worldPosition.x) + 1, -round(worldPos.z - chunk->worldPosition.y) + 1);
 			return true;
 		}
 	}

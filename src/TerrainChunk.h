@@ -41,6 +41,7 @@ public:
 	State state = State::_new;
 	vks::HeightMap* heightMap = nullptr;
 	glm::ivec2 position;
+	glm::vec2 worldPosition;
 	glm::vec3 center;
 	glm::vec3 min;
 	glm::vec3 max;
