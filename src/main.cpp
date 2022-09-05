@@ -61,6 +61,7 @@ public:
 	bool fixFrustum = false;
 	bool hasExtMemoryBudget = false;
 	bool stickToTerrain = false;
+	bool waterBlending = true;
 
 	struct MemoryBudget {
 		int heapCount;
@@ -163,7 +164,7 @@ public:
 
 	struct UniformDataParams {
 		uint32_t shadows = 0;
-		uint32_t fog = 1;
+		uint32_t smoothCoastLine = 1;
 		float waterAlpha = 2048.0;
 		uint32_t shadowPCF = 1;
 		glm::vec4 fogColor;
@@ -2251,10 +2252,11 @@ public:
 		ImGui::SetNextWindowPos(ImVec2(40, 40), ImGuiSetCond_FirstUseEver);
 		ImGui::SetNextWindowSize(ImVec2(0, 0), ImGuiSetCond_FirstUseEver);
 		ImGui::Begin("Render options", nullptr, ImGuiWindowFlags_None);
-		overlay->checkBox("Fog", &uniformDataParams.fog);
 		overlay->checkBox("Shadows", &renderShadows);
 		overlay->checkBox("Trees", &renderTrees);
 		overlay->checkBox("Grass", &renderGrass);
+		overlay->checkBox("Smooth coast line", &uniformDataParams.smoothCoastLine);
+		overlay->sliderFloat("Water alpha", &uniformDataParams.waterAlpha, 1.0f, 4096.0f);
 		if (overlay->sliderFloat("Chunk draw distance", &heightMapSettings.maxChunkDrawDistance, 0.0f, 1024.0f)) {
 			infiniteTerrain.updateViewDistance(heightMapSettings.maxChunkDrawDistance);
 		}
