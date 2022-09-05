@@ -79,7 +79,6 @@ public:
 
 	struct TreeModelInfo {
 		std::string name;
-		float imposterScale = 1.0f;
 		struct Models {
 			vkglTF::Model model;
 			vkglTF::Model imposter;
@@ -88,7 +87,6 @@ public:
 	int selectedTreeType = 0;
 	int selectedGrassType = 0;
 
-	const std::vector<float> imposterScales = { 0.65f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
 	const std::vector<std::string> treeTypes = {
 		"spruce", "fir", "birch", "pine", "tropical", "tropical2", "palm", "coconut_palm"
 	};
@@ -165,7 +163,7 @@ public:
 	struct UniformDataParams {
 		uint32_t shadows = 0;
 		uint32_t smoothCoastLine = 1;
-		float waterAlpha = 2048.0;
+		float waterAlpha = 512.0f;
 		uint32_t shadowPCF = 1;
 		glm::vec4 fogColor;
 		glm::vec4 waterColor;
@@ -306,7 +304,7 @@ public:
 	int32_t terrainSetIndex = 0;
 
 	inline float goldNoise(glm::vec2 xy, float seed) {
-		const float PHI = 1.61803398874989484820459;
+		const float PHI = 1.61803398874989484820459f;
 		float ip;
 		return modf(tan(glm::distance(xy * PHI, xy) * seed) * xy.x, &ip);
 	}
@@ -391,7 +389,7 @@ public:
 								}
 								idImpostors[idxImpostor].pos = object.worldpos;
 								idImpostors[idxImpostor].rotation = object.rotation;
-								idImpostors[idxImpostor].scale = object.scale * treeModelInfo[selectedTreeType].imposterScale;
+								idImpostors[idxImpostor].scale = object.scale;
 								idImpostors[idxImpostor].color = object.color;
 								// Fade in with terrain chunk
 								idImpostors[idxImpostor].color.a = terrainChunk->alpha;
@@ -1138,7 +1136,6 @@ public:
 	{
 		models.skysphere.loadFromFile(getAssetPath() + "scenes/geosphere.gltf", vulkanDevice, queue);
 		models.plane.loadFromFile(getAssetPath() + "scenes/plane.gltf", vulkanDevice, queue);
-//		models.grass.loadFromFile(getAssetPath() + "scenes/grasspatch_medium.gltf", vulkanDevice, queue, vkglTF::FileLoadingFlags::FlipY | vkglTF::FileLoadingFlags::PreTransformVertices);
 
 		const int fileLoadingFlags = vkglTF::FileLoadingFlags::FlipY | vkglTF::FileLoadingFlags::PreTransformVertices;
 
@@ -1147,7 +1144,6 @@ public:
 			treeModelInfo[i].name = treeTypes[i];
 			treeModelInfo[i].models.model.loadFromFile(getAssetPath() + "scenes/trees/" + treeTypes[i] + "/" + treeTypes[i] + ".gltf", vulkanDevice, queue, fileLoadingFlags);
 			treeModelInfo[i].models.imposter.loadFromFile(getAssetPath() + "scenes/trees/" + treeTypes[i] + "_imposter/" + treeTypes[i] + "_imposter.gltf", vulkanDevice, queue, fileLoadingFlags);
-			treeModelInfo[i].imposterScale = imposterScales[i];
 		}
 
 		grassModels.resize(grassTypes.size());
@@ -1155,7 +1151,6 @@ public:
 			grassModels[i].loadFromFile(getAssetPath() + "scenes/" + grassTypes[i] + ".gltf", vulkanDevice, queue, fileLoadingFlags);
 		}
 
-		//textures.skySphere.loadFromFile(getAssetPath() + "textures/skysphere2.ktx", VK_FORMAT_R8G8B8A8_UNORM, vulkanDevice, queue);
 		loadSkySphere(heightMapSettings.skySphere);
 		textures.waterNormalMap.loadFromFile(getAssetPath() + "textures/water_normal_rgba.ktx", VK_FORMAT_R8G8B8A8_UNORM, vulkanDevice, queue);
 		loadTerrainSet(heightMapSettings.terrainSet);
@@ -1663,8 +1658,7 @@ public:
 		// Grass
 		pipelines.grass = new Pipeline(device);
 		pipelines.grass->setCreateInfo(pipelineCI);
-		pipelines.sky->setSampleCount(settings.multiSampling ? settings.sampleCount : VK_SAMPLE_COUNT_1_BIT);
-
+		pipelines.grass->setSampleCount(settings.multiSampling ? settings.sampleCount : VK_SAMPLE_COUNT_1_BIT);
 		pipelines.grass->setVertexInputState(&vertexInputStateModelInstanced);
 		pipelines.grass->setCache(pipelineCache);
 		pipelines.grass->setLayout(pipelineLayouts.tree);
@@ -1755,52 +1749,33 @@ public:
 		}
 	}
 
-	void updateUniformParams()
-	{
-		const uint32_t currentFrameIndex = getCurrentFrameIndex();
-		uniformDataParams.shadows = renderShadows;
-		uniformDataParams.fogColor = glm::vec4(heightMapSettings.fogColor[0], heightMapSettings.fogColor[1], heightMapSettings.fogColor[2], 1.0f);
-		uniformDataParams.waterColor = glm::vec4(heightMapSettings.waterColor[0], heightMapSettings.waterColor[1], heightMapSettings.waterColor[2], 1.0f);
-		uniformDataParams.grassColor = glm::vec4(heightMapSettings.grassColor[0], heightMapSettings.grassColor[1], heightMapSettings.grassColor[2], 1.0f);
-		memcpy(frameObjects[currentFrameIndex].uniformBuffers.params.mapped, &uniformDataParams, sizeof(UniformDataParams));
-	}
-
 	void updateUniformBuffers()
 	{
-		float radius = 50.0f;
-		lightPos = glm::vec4(20.0f, -15.0f, -15.0f, 0.0f) * radius;
-		lightPos = glm::vec4(-20.0f, -15.0f, -15.0f, 0.0f) * radius;
-		lightPos = glm::vec4(-20.0f, -15.0f, 20.0f, 0.0f) * radius;
-		// @todo
-		lightPos = glm::vec4(20.0f, -10.0f, 20.0f, 0.0f);
-		
-		lightPos = glm::vec4(-48.0f, -80.0f, 46.0f, 0.0f);
+		profiling.uniformUpdate.start();
 
-		//float angle = glm::radians(timer * 360.0f);
-		//lightPos = glm::vec4(cos(angle) * radius, -15.0f, sin(angle) * radius, 0.0f);
-		
+		const uint32_t currentFrameIndex = getCurrentFrameIndex();
+
+		// Shared UBO
+		lightPos = glm::vec4(-48.0f, -80.0f, 46.0f, 0.0f);
 		uboShared.lightDir = glm::normalize(-lightPos);
 		uboShared.projection = camera.matrices.perspective;
 		uboShared.model = camera.matrices.view;
 		uboShared.time = sin(glm::radians(timer * 360.0f));
 		uboShared.cameraPos = glm::vec4(camera.position, 0.0f);
-
-		const uint32_t currentFrameIndex = getCurrentFrameIndex();
-
-		// Mesh
 		memcpy(frameObjects[currentFrameIndex].uniformBuffers.shared.mapped, &uboShared, sizeof(uboShared));
 
-		updateUniformBufferCSM();
-	}
+		// Scene parameters
+		uniformDataParams.shadows = renderShadows;
+		uniformDataParams.fogColor = glm::vec4(heightMapSettings.fogColor[0], heightMapSettings.fogColor[1], heightMapSettings.fogColor[2], 1.0f);
+		uniformDataParams.waterColor = glm::vec4(heightMapSettings.waterColor[0], heightMapSettings.waterColor[1], heightMapSettings.waterColor[2], 1.0f);
+		uniformDataParams.grassColor = glm::vec4(heightMapSettings.grassColor[0], heightMapSettings.grassColor[1], heightMapSettings.grassColor[2], 1.0f);
+		memcpy(frameObjects[currentFrameIndex].uniformBuffers.params.mapped, &uniformDataParams, sizeof(UniformDataParams));
 
-	void updateUniformBufferCSM() {
-		const uint32_t currentFrameIndex = getCurrentFrameIndex();
-
+		// Shadow cascades
 		for (auto i = 0; i < cascades.size(); i++) {
 			depthPass.ubo.cascadeViewProjMat[i] = cascades[i].viewProjMatrix;
 		}
 		memcpy(frameObjects[currentFrameIndex].uniformBuffers.depthPass.mapped, &depthPass.ubo, sizeof(depthPass.ubo));
-
 		for (auto i = 0; i < cascades.size(); i++) {
 			uboCSM.cascadeSplits[i] = cascades[i].splitDepth;
 			uboCSM.cascadeViewProjMat[i] = cascades[i].viewProjMatrix;
