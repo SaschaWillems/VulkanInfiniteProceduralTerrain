@@ -54,7 +54,7 @@ public:
 	bool debugDisplayReflection = false;
 	bool debugDisplayRefraction = false;
 	bool displayWaterPlane = true;
-	bool renderShadows = false;
+	bool renderShadows = true;
 	bool renderTrees = true;
 	bool renderGrass = true;
 	bool renderTerrain = true;
@@ -2151,8 +2151,7 @@ public:
 
 		if (stickToTerrain) {
 			float h = 0.0f;
-			float r = 0.0f;
-			infiniteTerrain.getHeightAndRandomValue(camera.position, h, r);
+			infiniteTerrain.getHeight(camera.position, h);
 			camera.position.y = h - 3.0f;
 		}
 
