@@ -1809,7 +1809,7 @@ public:
 		prepareUniformBuffers();
 		createPipelines();
 		setupDescriptorSet();
-		loadHeightMapSettings("default");
+		loadHeightMapSettings("coastline");
 
 		prepared = true;
 	}
