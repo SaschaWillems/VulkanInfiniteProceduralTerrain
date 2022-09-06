@@ -832,11 +832,11 @@ public:
 			}
 		}
 
+		vkCmdSetCullMode(cb->handle, VK_CULL_MODE_NONE);
+		const VkDeviceSize offsets[1] = { 0 };
+
 		// Trees
 		if ((renderTrees) && (drawType != SceneDrawType::sceneDrawTypeRefract) && (drawBatches.trees.instanceBuffers[currentFrameIndex].buffer != VK_NULL_HANDLE) && (drawBatches.trees.instanceBuffers[currentFrameIndex].elements > 0)) {
-			vkCmdSetCullMode(cb->handle, VK_CULL_MODE_NONE);
-			const VkDeviceSize offsets[1] = { 0 };
-
 			cb->bindPipeline(offscreen ? pipelines.treeOffscreen : pipelines.tree);
 			cb->bindDescriptorSets(pipelineLayouts.tree, { currentFrame.uniformBuffers.shared.descriptorSet }, 0);
 			cb->bindDescriptorSets(pipelineLayouts.tree, { currentFrame.uniformBuffers.params.descriptorSet, descriptorSets.shadowCascades, currentFrame.uniformBuffers.CSM.descriptorSet }, 2);
@@ -871,8 +871,6 @@ public:
 
 		// Grass
 		if (renderGrass && (drawType != SceneDrawType::sceneDrawTypeRefract) && (drawBatches.grass.instanceBuffers[currentFrameIndex].buffer != VK_NULL_HANDLE) && (drawBatches.grass.instanceBuffers[currentFrameIndex].elements > 0)) {
-			vkCmdSetCullMode(cb->handle, VK_CULL_MODE_NONE);
-			const VkDeviceSize offsets[1] = { 0 };
 
 			std::vector<DrawBatch*> batches = { &drawBatches.grass };
 			for (auto& drawBatch : batches) {
@@ -1097,10 +1095,6 @@ public:
 		cb->setScissor(0, 0, SHADOWMAP_DIM, SHADOWMAP_DIM);
 		drawShadowCasters(cb);
 	}
-
-	/*
-		Sample
-	*/
 
 	void loadSkySphere(const std::string filename)
 	{
@@ -1603,7 +1597,7 @@ public:
 
 		// Sky
 		rasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
-		rasterizationState.cullMode = VK_CULL_MODE_NONE;
+		rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
 		depthStencilState.depthWriteEnable = VK_FALSE;
 		pipelines.sky = new Pipeline(device);
 		pipelines.sky->setCreateInfo(pipelineCI);
@@ -2132,7 +2126,6 @@ public:
 
 		updateCascades();
 		updateUniformBuffers();
-		updateUniformParams();
 		updateDrawBatches();
 
 		updateOverlay(getCurrentFrameIndex());
