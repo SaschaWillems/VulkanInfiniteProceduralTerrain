@@ -294,6 +294,8 @@ public:
 		Timing drawBatchUpdate;
 		Timing drawBatchCpu;
 		Timing drawBatchUpload;
+		Timing cbBuild;
+		Timing uniformUpdate;
 	} profiling;
 
 	struct FileList {
@@ -1777,6 +1779,8 @@ public:
 		uboCSM.inverseViewMat = glm::inverse(camera.matrices.view);
 		uboCSM.lightDir = normalize(-lightPos);
 		memcpy(frameObjects[currentFrameIndex].uniformBuffers.CSM.mapped, &uboCSM, sizeof(uboCSM));
+
+		profiling.uniformUpdate.stop();
 	}
 
 	void prepare()
@@ -1810,12 +1814,13 @@ public:
 
 	void buildCommandBuffer(CommandBuffer* commandBuffer)
 	{
+		profiling.cbBuild.start();
+
 		CommandBuffer* cb = commandBuffer;
 		cb->begin();
 
 		// CSM
 		if (renderShadows) {
-
 			// A single depth stencil attachment info can be used, but they can also be specified separately.
 			// When both are specified separately, the only requirement is that the image view is identical.			
 			VkRenderingAttachmentInfo depthStencilAttachment{};
@@ -1835,11 +1840,9 @@ public:
 			renderingInfo.viewMask = 0b00001111;
 
 			vks::tools::setImageLayout(cb->handle, depth.image->handle, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, SHADOW_MAP_CASCADE_COUNT });
-
 			vkCmdBeginRendering(cb->handle, &renderingInfo);
 			drawCSM(cb);
 			vkCmdEndRendering(cb->handle);
-
 			vks::tools::setImageLayout(cb->handle, depth.image->handle, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, SHADOW_MAP_CASCADE_COUNT });
 		}
 
@@ -1874,7 +1877,6 @@ public:
 		renderingInfo.pStencilAttachment = &depthStencilAttachment;
 
 		// Begin dynamic rendering
-
 		vks::tools::insertImageMemoryBarrier(
 			cb->handle,
 			offscreenPass.reflection.image->handle,
@@ -2096,6 +2098,8 @@ public:
 			VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
 
 		cb->end();
+
+		profiling.cbBuild.stop();
 	}
 
 	void updateMemoryBudgets() {
@@ -2177,6 +2181,8 @@ public:
 			ImGui::Text("Draw batch CPU: %.2f ms", profiling.drawBatchCpu.tDelta);
 			ImGui::Text("Draw batch upload: %.2f ms", profiling.drawBatchUpload.tDelta);
 			ImGui::Text("Draw batch total: %.2f ms", profiling.drawBatchUpdate.tDelta);
+			ImGui::Text("Uniform update: %.2f ms", profiling.uniformUpdate.tDelta);
+			ImGui::Text("Command buffer building: %.2f ms", profiling.cbBuild.tDelta);
 		}
 		ImGui::Text("Active threads: %d", activeThreadCount.load());
 		ImGui::End();
