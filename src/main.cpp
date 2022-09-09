@@ -15,6 +15,7 @@
 #include <mutex>
 #include <math.h>
 #include <filesystem>
+#include <atomic>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -278,8 +279,8 @@ public:
 
 	// @todo: move
 	struct Timing {
-		std::chrono::steady_clock::time_point tStart;
-		std::chrono::steady_clock::time_point tEnd;
+		std::chrono::high_resolution_clock::time_point tStart;
+		std::chrono::high_resolution_clock::time_point tEnd;
 		double tDelta;
 
 		void start() {
@@ -643,8 +644,8 @@ public:
 	void createImage(OffscreenImage& target, ImageType type)
 	{
 		VkFormat format = VK_FORMAT_UNDEFINED;
-		VkImageAspectFlags aspectMask;
-		VkImageUsageFlags usageFlags;
+		VkImageAspectFlags aspectMask = 0;
+		VkImageUsageFlags usageFlags = 0;
 		switch (type) {
 		case ImageType::Color:
 			format = swapChain.colorFormat;
