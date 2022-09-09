@@ -8,7 +8,7 @@
 
 #include "AssetManager.h"
 
-void AssetManager::addModel(const std::string& filePath, const std::string& name)
+void AssetManager::addModel(const std::string& filePath, const std::string& name, int modelLoadingFlags)
 {
 	auto it = models.find(name);
 	if (it != models.end()) {
@@ -16,8 +16,7 @@ void AssetManager::addModel(const std::string& filePath, const std::string& name
 		return;
 	}
 	std::shared_ptr<ModelAsset> asset = std::make_shared<ModelAsset>();
-	const int fileLoadingFlags = vkglTF::FileLoadingFlags::FlipY | vkglTF::FileLoadingFlags::PreTransformVertices;
-	asset->model.loadFromFile(filePath, VulkanContext::device, VulkanContext::graphicsQueue, fileLoadingFlags);
+	asset->model.loadFromFile(filePath, VulkanContext::device, VulkanContext::graphicsQueue, modelLoadingFlags);
 	asset->filePath = filePath;
 	asset->name = name;
 	models.insert(std::make_pair(name, asset));
