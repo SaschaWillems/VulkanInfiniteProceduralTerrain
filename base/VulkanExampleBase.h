@@ -1,7 +1,7 @@
 /*
 * Vulkan Example base class
 *
-* Copyright (C) by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2016-2025 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -57,13 +57,7 @@
 #include "CommandBuffer.hpp"
 #include "CommandPool.hpp"
 
-struct VulkanFrameObjects
-{
-	CommandBuffer* commandBuffer;
-	VkFence renderCompleteFence;
-	VkSemaphore renderCompleteSemaphore;
-	VkSemaphore presentCompleteSemaphore;
-};
+constexpr uint32_t maxConcurrentFrames{ 2 };
 
 class VulkanExampleBase
 {
@@ -124,9 +118,6 @@ protected:
 	// Contains command buffers and semaphores to be presented to the queue
 	VkSubmitInfo submitInfo;
 	CommandPool* commandPool;
-	std::vector<CommandBuffer*> commandBuffers;
-	// Active frame buffer index
-	uint32_t currentBuffer = 0;
 	// List of shader modules created (stored for cleanup)
 	// @todo: remove/replace
 	std::vector<VkShaderModule> shaderModules;
@@ -134,18 +125,16 @@ protected:
 	VkPipelineCache pipelineCache;
 	// Wraps the swap chain to present images (framebuffers) to the windowing system
 	VulkanSwapChain swapChain;
-	// Synchronization semaphores
-	struct {
-		// Swap chain image presentation
-		VkSemaphore presentComplete;
-		// Command buffer submission and execution
-		VkSemaphore renderComplete;
-	} semaphores;
-	std::vector<VkFence> waitFences;
-	// @todo
-	uint32_t frameIndex = 0;
-	uint32_t renderAhead = 2;
+	// Synchronization related objects and variables
+	// These are used to have multiple frame buffers "in flight" to get some CPU/GPU parallelism
+	uint32_t currentImageIndex{ 0 };
+	uint32_t currentBuffer{ 0 };
+	std::array<VkSemaphore, maxConcurrentFrames> presentCompleteSemaphores{};
+	std::vector<VkSemaphore> renderCompleteSemaphores{};
+	std::array<VkFence, maxConcurrentFrames> waitFences;
 public: 
+	std::array<CommandBuffer*, maxConcurrentFrames> commandBuffers;
+
 	bool prepared = false;
 	uint32_t width = 1280;
 	uint32_t height = 720;
@@ -379,13 +368,6 @@ public:
 	// May be necessary during runtime if options are toggled 
 	void destroyCommandBuffers();
 
-	// Command buffer creation
-	// Creates and returns a new command buffer
-	VkCommandBuffer createCommandBuffer(VkCommandBufferLevel level, bool begin);
-	// End the command buffer, submit it to the queue and free (if requested)
-	// Note : Waits for the queue to become idle
-	void flushCommandBuffer(VkCommandBuffer commandBuffer, VkQueue queue, bool free);
-
 	// Create a cache pool for rendering pipelines
 	void createPipelineCache();
 
@@ -416,15 +398,6 @@ public:
 
 	/** @brief (Virtual) Called when the UI overlay is updating, can be used to add custom elements to the overlay */
 	virtual void OnUpdateUIOverlay(vks::UIOverlay *overlay);
-
-	// @todo: Functions for reworked proper sync and per-frame resources
-	void prepareFrame(VulkanFrameObjects& frame);
-	void submitFrame(VulkanFrameObjects& frame);
-	uint32_t getFrameCount();
-	uint32_t getCurrentFrameIndex();
-
-	void createBaseFrameObjects(VulkanFrameObjects& frame);
-	void destroyBaseFrameObjects(VulkanFrameObjects& frame);
 };
 
 // OS specific macros for the example main entry points

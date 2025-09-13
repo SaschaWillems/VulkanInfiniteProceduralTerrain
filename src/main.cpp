@@ -172,7 +172,7 @@ public:
 		glm::vec4 layers[TERRAIN_LAYER_COUNT];
 	} uniformDataParams;
 
-	struct FrameObjects : public VulkanFrameObjects {
+	struct FrameObjects {
 		struct UniformBuffers {
 			vks::Buffer shared;
 			vks::Buffer CSM;
@@ -180,7 +180,7 @@ public:
 			vks::Buffer depthPass;
 		} uniformBuffers;
 	};
-	std::vector<FrameObjects> frameObjects;
+	std::array<FrameObjects, maxConcurrentFrames> frameObjects;
 
 	struct {
 		PipelineLayout* debug;
@@ -269,7 +269,7 @@ public:
 	};
 	struct DrawBatch {
 		vkglTF::Model* model = nullptr;
-		std::vector<DrawBatchBuffer> instanceBuffers;
+		std::array<DrawBatchBuffer, maxConcurrentFrames> instanceBuffers;
 	};
 	struct DrawBatches {
 		DrawBatch trees;
@@ -763,9 +763,7 @@ public:
 
 		bool offscreen = drawType != SceneDrawType::sceneDrawTypeDisplay;
 
-		const uint32_t currentFrameIndex = getCurrentFrameIndex();
-
-		FrameObjects currentFrame = frameObjects[getCurrentFrameIndex()];
+		FrameObjects currentFrame = frameObjects[currentBuffer];
 
 		// Skysphere
 		if (drawType != SceneDrawType::sceneDrawTypeRefract) {
@@ -774,7 +772,7 @@ public:
 			cb->bindPipeline(offscreen ? pipelines.skyOffscreen : pipelines.sky);
 			cb->bindDescriptorSets(pipelineLayouts.sky, {
 				descriptorSets.skysphere,
-				frameObjects[currentFrameIndex].uniformBuffers.shared.descriptorSet },
+				frameObjects[currentBuffer].uniformBuffers.shared.descriptorSet },
 				0);
 			cb->updatePushConstant(pipelineLayouts.sky, 0, &pushConst);
 			models.skysphere.draw(cb->handle);
@@ -786,9 +784,9 @@ public:
 			cb->bindPipeline(offscreen ? pipelines.terrainOffscreen : pipelines.terrain);
 			cb->bindDescriptorSets(pipelineLayouts.terrain,
 				{ descriptorSets.terrain,
-					frameObjects[currentFrameIndex].uniformBuffers.shared.descriptorSet,
-					frameObjects[currentFrameIndex].uniformBuffers.params.descriptorSet,
-					frameObjects[currentFrameIndex].uniformBuffers.CSM.descriptorSet },
+					frameObjects[currentBuffer].uniformBuffers.shared.descriptorSet,
+					frameObjects[currentBuffer].uniformBuffers.params.descriptorSet,
+					frameObjects[currentBuffer].uniformBuffers.CSM.descriptorSet },
 				0);
 			for (auto& terrainChunk : infiniteTerrain.terrainChunks) {
 				if (terrainChunk->visible && (terrainChunk->state == TerrainChunk::State::generated)) {
@@ -819,9 +817,9 @@ public:
 		if ((drawType == SceneDrawType::sceneDrawTypeDisplay) && (displayWaterPlane)) {
 			cb->bindDescriptorSets(pipelineLayouts.water, { 
 				descriptorSets.waterplane,
-				frameObjects[currentFrameIndex].uniformBuffers.shared.descriptorSet,
-				frameObjects[currentFrameIndex].uniformBuffers.params.descriptorSet,
-				frameObjects[currentFrameIndex].uniformBuffers.CSM.descriptorSet }, 
+				frameObjects[currentBuffer].uniformBuffers.shared.descriptorSet,
+				frameObjects[currentBuffer].uniformBuffers.params.descriptorSet,
+				frameObjects[currentBuffer].uniformBuffers.CSM.descriptorSet }, 
 			0);
 			cb->bindPipeline(offscreen ? pipelines.waterOffscreen : (waterBlending ? pipelines.waterBlend : pipelines.water));
 			for (auto& terrainChunk : infiniteTerrain.terrainChunks) {
@@ -839,7 +837,7 @@ public:
 		const VkDeviceSize offsets[1] = { 0 };
 
 		// Trees
-		if ((renderTrees) && (drawType != SceneDrawType::sceneDrawTypeRefract) && (drawBatches.trees.instanceBuffers[currentFrameIndex].buffer != VK_NULL_HANDLE) && (drawBatches.trees.instanceBuffers[currentFrameIndex].elements > 0)) {
+		if ((renderTrees) && (drawType != SceneDrawType::sceneDrawTypeRefract) && (drawBatches.trees.instanceBuffers[currentBuffer].buffer != VK_NULL_HANDLE) && (drawBatches.trees.instanceBuffers[currentBuffer].elements > 0)) {
 			cb->bindPipeline(offscreen ? pipelines.treeOffscreen : pipelines.tree);
 			cb->bindDescriptorSets(pipelineLayouts.tree, { currentFrame.uniformBuffers.shared.descriptorSet }, 0);
 			cb->bindDescriptorSets(pipelineLayouts.tree, { currentFrame.uniformBuffers.params.descriptorSet, descriptorSets.shadowCascades, currentFrame.uniformBuffers.CSM.descriptorSet }, 2);
@@ -856,30 +854,30 @@ public:
 
 			std::vector<DrawBatch*> batches = { &drawBatches.trees, &drawBatches.treeImpostors };
 			for (auto& drawBatch : batches) {
-				if (drawBatch->instanceBuffers[currentFrameIndex].elements <= 0) {
+				if (drawBatch->instanceBuffers[currentBuffer].elements <= 0) {
 					continue;
 				}
 				vkCmdBindVertexBuffers(cb->handle, 0, 1, &drawBatch->model->vertices.buffer, offsets);
 				vkCmdBindIndexBuffer(cb->handle, drawBatch->model->indices.buffer, 0, VK_INDEX_TYPE_UINT32);
-				vkCmdBindVertexBuffers(cb->handle, 1, 1, &drawBatch->instanceBuffers[currentFrameIndex].buffer, offsets);
+				vkCmdBindVertexBuffers(cb->handle, 1, 1, &drawBatch->instanceBuffers[currentBuffer].buffer, offsets);
 				for (auto& node : drawBatch->model->linearNodes) {
 					if (node->mesh) {
 						vkglTF::Primitive* primitive = node->mesh->primitives[0];
 						vkCmdBindDescriptorSets(cb->handle, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.tree->handle, 1, 1, &primitive->material.descriptorSet, 0, nullptr);
-						vkCmdDrawIndexed(cb->handle, primitive->indexCount, drawBatch->instanceBuffers[currentFrameIndex].elements, primitive->firstIndex, 0, 0);
+						vkCmdDrawIndexed(cb->handle, primitive->indexCount, drawBatch->instanceBuffers[currentBuffer].elements, primitive->firstIndex, 0, 0);
 					}
 				}
 			}
 		}
 
 		// Grass
-		if (renderGrass && (drawType != SceneDrawType::sceneDrawTypeRefract) && (drawBatches.grass.instanceBuffers[currentFrameIndex].buffer != VK_NULL_HANDLE) && (drawBatches.grass.instanceBuffers[currentFrameIndex].elements > 0)) {
+		if (renderGrass && (drawType != SceneDrawType::sceneDrawTypeRefract) && (drawBatches.grass.instanceBuffers[currentBuffer].buffer != VK_NULL_HANDLE) && (drawBatches.grass.instanceBuffers[currentBuffer].elements > 0)) {
 
 			std::vector<DrawBatch*> batches = { &drawBatches.grass };
 			for (auto& drawBatch : batches) {
 				vkCmdBindVertexBuffers(cb->handle, 0, 1, &drawBatch->model->vertices.buffer, offsets);
 				vkCmdBindIndexBuffer(cb->handle, drawBatch->model->indices.buffer, 0, VK_INDEX_TYPE_UINT32);
-				vkCmdBindVertexBuffers(cb->handle, 1, 1, &drawBatch->instanceBuffers[currentFrameIndex].buffer, offsets);
+				vkCmdBindVertexBuffers(cb->handle, 1, 1, &drawBatch->instanceBuffers[currentBuffer].buffer, offsets);
 
 				pushConst.alpha = 1.0f;
 				cb->updatePushConstant(pipelineLayouts.tree, 0, &pushConst);
@@ -899,7 +897,7 @@ public:
 					if (node->mesh) {
 						vkglTF::Primitive* primitive = node->mesh->primitives[0];
 						vkCmdBindDescriptorSets(cb->handle, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts.tree->handle, 1, 1, &primitive->material.descriptorSet, 0, nullptr);
-						vkCmdDrawIndexed(cb->handle, primitive->indexCount, drawBatch->instanceBuffers[currentFrameIndex].elements, primitive->firstIndex, 0, 0);
+						vkCmdDrawIndexed(cb->handle, primitive->indexCount, drawBatch->instanceBuffers[currentBuffer].elements, primitive->firstIndex, 0, 0);
 					}
 				}
 			}
@@ -909,9 +907,7 @@ public:
 	}
 
 	void drawShadowCasters(CommandBuffer* cb) {
-		const uint32_t currentFrameIndex = getCurrentFrameIndex();
-
-		FrameObjects currentFrame = frameObjects[getCurrentFrameIndex()];
+		FrameObjects currentFrame = frameObjects[currentBuffer];
 
 		glm::vec4 pushConstPos = glm::vec4(0.0f);
 		cb->bindPipeline(pipelines.depthpass);
@@ -930,14 +926,14 @@ public:
 		if (renderTrees) {
 			std::vector<DrawBatch*> batches = { &drawBatches.trees, &drawBatches.treeImpostors };
 			for (auto drawBatch : batches) {
-				if (drawBatches.trees.instanceBuffers[currentFrameIndex].buffer != VK_NULL_HANDLE) {
+				if (drawBatches.trees.instanceBuffers[currentBuffer].buffer != VK_NULL_HANDLE) {
 					vkCmdSetCullMode(cb->handle, VK_CULL_MODE_NONE);
 					const VkDeviceSize offsets[1] = { 0 };
 					cb->bindPipeline(pipelines.depthpassTree);
-					vkCmdBindVertexBuffers(cb->handle, 1, 1, &drawBatch->instanceBuffers[currentFrameIndex].buffer, offsets);
+					vkCmdBindVertexBuffers(cb->handle, 1, 1, &drawBatch->instanceBuffers[currentBuffer].buffer, offsets);
 					pushConstPos = glm::vec4(0.0f);
 					cb->updatePushConstant(depthPass.pipelineLayout, 0, &pushConstPos);
-					drawBatch->model->draw(cb->handle, vkglTF::RenderFlags::BindImages, depthPass.pipelineLayout->handle, 1, drawBatch->instanceBuffers[currentFrameIndex].elements);
+					drawBatch->model->draw(cb->handle, vkglTF::RenderFlags::BindImages, depthPass.pipelineLayout->handle, 1, drawBatch->instanceBuffers[currentBuffer].elements);
 				}
 			}
 		}
@@ -1191,7 +1187,7 @@ public:
 
 				TerrainChunk* chunk = infiniteTerrain.terrainChunkgsUpdateList[i];
 				if (chunk->state == TerrainChunk::State::_new) {
-					chunk->state == TerrainChunk::State::generating;
+					chunk->state = TerrainChunk::State::generating;
 					std::thread chunkThread(&VulkanExample::updateTerrainChunkThreadFn, this, infiniteTerrain.terrainChunkgsUpdateList[i]);
 					chunkThread.detach();
 				}
@@ -1715,9 +1711,7 @@ public:
 	// Prepare and initialize uniform buffer containing shader uniforms
 	void prepareUniformBuffers()
 	{		
-		frameObjects.resize(getFrameCount());
 		for (FrameObjects& frame : frameObjects) {
-			createBaseFrameObjects(frame);
 			// Uniform buffers
 			VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &frame.uniformBuffers.shared, sizeof(uboShared)));
 			VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &frame.uniformBuffers.depthPass, sizeof(depthPass.ubo)));
@@ -1739,7 +1733,6 @@ public:
 
 		std::vector<DrawBatch*> batches = { &drawBatches.trees, &drawBatches.treeImpostors, &drawBatches.grass };
 		for (auto batch : batches) {
-			batch->instanceBuffers.resize(getFrameCount());
 			for (auto& buffer : batch->instanceBuffers) {
 				// @todo: clear required?
 			}
@@ -1750,7 +1743,6 @@ public:
 	{
 		profiling.uniformUpdate.start();
 
-		const uint32_t currentFrameIndex = getCurrentFrameIndex();
 
 		// Shared UBO
 		lightPos = glm::vec4(-48.0f, -80.0f, 46.0f, 0.0f);
@@ -1759,27 +1751,27 @@ public:
 		uboShared.model = camera.matrices.view;
 		uboShared.time = sin(glm::radians(timer * 360.0f));
 		uboShared.cameraPos = glm::vec4(camera.position, 0.0f);
-		memcpy(frameObjects[currentFrameIndex].uniformBuffers.shared.mapped, &uboShared, sizeof(uboShared));
+		memcpy(frameObjects[currentBuffer].uniformBuffers.shared.mapped, &uboShared, sizeof(uboShared));
 
 		// Scene parameters
 		uniformDataParams.shadows = renderShadows;
 		uniformDataParams.fogColor = glm::vec4(heightMapSettings.fogColor[0], heightMapSettings.fogColor[1], heightMapSettings.fogColor[2], 1.0f);
 		uniformDataParams.waterColor = glm::vec4(heightMapSettings.waterColor[0], heightMapSettings.waterColor[1], heightMapSettings.waterColor[2], 1.0f);
 		uniformDataParams.grassColor = glm::vec4(heightMapSettings.grassColor[0], heightMapSettings.grassColor[1], heightMapSettings.grassColor[2], 1.0f);
-		memcpy(frameObjects[currentFrameIndex].uniformBuffers.params.mapped, &uniformDataParams, sizeof(UniformDataParams));
+		memcpy(frameObjects[currentBuffer].uniformBuffers.params.mapped, &uniformDataParams, sizeof(UniformDataParams));
 
 		// Shadow cascades
 		for (auto i = 0; i < cascades.size(); i++) {
 			depthPass.ubo.cascadeViewProjMat[i] = cascades[i].viewProjMatrix;
 		}
-		memcpy(frameObjects[currentFrameIndex].uniformBuffers.depthPass.mapped, &depthPass.ubo, sizeof(depthPass.ubo));
+		memcpy(frameObjects[currentBuffer].uniformBuffers.depthPass.mapped, &depthPass.ubo, sizeof(depthPass.ubo));
 		for (auto i = 0; i < cascades.size(); i++) {
 			uboCSM.cascadeSplits[i] = cascades[i].splitDepth;
 			uboCSM.cascadeViewProjMat[i] = cascades[i].viewProjMatrix;
 		}
 		uboCSM.inverseViewMat = glm::inverse(camera.matrices.view);
 		uboCSM.lightDir = normalize(-lightPos);
-		memcpy(frameObjects[currentFrameIndex].uniformBuffers.CSM.mapped, &uboCSM, sizeof(uboCSM));
+		memcpy(frameObjects[currentBuffer].uniformBuffers.CSM.mapped, &uboCSM, sizeof(uboCSM));
 
 		profiling.uniformUpdate.stop();
 	}
@@ -1997,7 +1989,7 @@ public:
 		// Transition color and depth images for drawing
 		vks::tools::insertImageMemoryBarrier(
 			cb->handle,
-			swapChain.buffers[swapChain.currentImageIndex].image,
+			swapChain.buffers[currentImageIndex].image,
 			0,
 			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 			VK_IMAGE_LAYOUT_UNDEFINED,
@@ -2025,7 +2017,7 @@ public:
 		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 		colorAttachment.clearValue.color = { 0.0f,0.0f,0.0f,0.0f };
 		colorAttachment.resolveImageLayout = VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL;
-		colorAttachment.resolveImageView = swapChain.buffers[swapChain.currentImageIndex].view;
+		colorAttachment.resolveImageView = swapChain.buffers[currentImageIndex].view;
 		colorAttachment.resolveMode = VK_RESOLVE_MODE_AVERAGE_BIT;
 
 		// A single depth stencil attachment info can be used, but they can also be specified separately.
@@ -2081,7 +2073,7 @@ public:
 		}
 
 		if (UIOverlay.visible) {
-			UIOverlay.draw(cb->handle, getCurrentFrameIndex());
+			UIOverlay.draw(cb->handle, currentBuffer);
 		}
 
 		vkCmdEndRendering(cb->handle);
@@ -2089,7 +2081,7 @@ public:
 		// Transition color image for presentation
 		vks::tools::insertImageMemoryBarrier(
 			cb->handle,
-			swapChain.buffers[swapChain.currentImageIndex].image,
+			swapChain.buffers[currentImageIndex].image,
 			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
 			0,
 			VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -2119,9 +2111,7 @@ public:
 
 	virtual void render()
 	{
-		FrameObjects currentFrame = frameObjects[getCurrentFrameIndex()];
-
-		VulkanExampleBase::prepareFrame(currentFrame);
+		VulkanExampleBase::prepareFrame();
 
 		if (stickToTerrain) {
 			float h = 0.0f;
@@ -2133,15 +2123,15 @@ public:
 		updateUniformBuffers();
 		updateDrawBatches();
 
-		updateOverlay(getCurrentFrameIndex());
+		updateOverlay(currentBuffer);
 
-		buildCommandBuffer(currentFrame.commandBuffer);
+		buildCommandBuffer(commandBuffers[currentBuffer]);
 
 		//if (vulkanDevice->queueFamilyIndices.graphics == vulkanDevice->queueFamilyIndices.transfer) {
 		//	// If we don't have a dedicated transfer queue, we need to make sure that the main and background threads don't use the (graphics) pipeline simultaneously
 		//	std::lock_guard<std::mutex> guard(lock_guard);
 		//}
-		VulkanExampleBase::submitFrame(currentFrame);
+		VulkanExampleBase::submitFrame();
 
 		updateMemoryBudgets();
 

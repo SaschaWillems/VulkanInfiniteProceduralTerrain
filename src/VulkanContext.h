@@ -9,6 +9,8 @@
 #include "vulkan/vulkan.h"
 #include "VulkanDevice.hpp"
 
+#pragma once
+
 class VulkanContext {
 public:
 	static VkQueue copyQueue;

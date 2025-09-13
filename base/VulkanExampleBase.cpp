@@ -2,7 +2,7 @@
 /*
 * Vulkan Example base class
 *
-* Copyright (C) by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2016-2025 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -118,8 +118,7 @@ const std::string VulkanExampleBase::getAssetPath()
 
 void VulkanExampleBase::createCommandBuffers()
 {
-	commandBuffers.resize(swapChain.imageCount);
-	for (auto &commandBuffer : commandBuffers) {
+	for (auto& commandBuffer : commandBuffers) {
 		commandBuffer = new CommandBuffer(device);
 		commandBuffer->setPool(commandPool);
 		commandBuffer->create();
@@ -130,53 +129,6 @@ void VulkanExampleBase::destroyCommandBuffers()
 {
 	for (auto& commandBuffer : commandBuffers) {
 		delete(commandBuffer);
-	}
-}
-
-// @todo: remove
-VkCommandBuffer VulkanExampleBase::createCommandBuffer(VkCommandBufferLevel level, bool begin)
-{
-	VkCommandBuffer cmdBuffer;
-
-	VkCommandBufferAllocateInfo cmdBufAllocateInfo =
-		vks::initializers::commandBufferAllocateInfo(
-			commandPool->handle,
-			level,
-			1);
-
-	VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &cmdBuffer));
-
-	// If requested, also start the new command buffer
-	if (begin)
-	{
-		VkCommandBufferBeginInfo cmdBufInfo = vks::initializers::commandBufferBeginInfo();
-		VK_CHECK_RESULT(vkBeginCommandBuffer(cmdBuffer, &cmdBufInfo));
-	}
-
-	return cmdBuffer;
-}
-
-// @todo: remove
-void VulkanExampleBase::flushCommandBuffer(VkCommandBuffer commandBuffer, VkQueue queue, bool free)
-{
-	if (commandBuffer == VK_NULL_HANDLE)
-	{
-		return;
-	}
-	
-	VK_CHECK_RESULT(vkEndCommandBuffer(commandBuffer));
-
-	VkSubmitInfo submitInfo = {};
-	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &commandBuffer;
-
-	VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE));
-	VK_CHECK_RESULT(vkQueueWaitIdle(queue));
-
-	if (free)
-	{
-		vkFreeCommandBuffers(device, commandPool->handle, 1, &commandBuffer);
 	}
 }
 
@@ -204,7 +156,7 @@ void VulkanExampleBase::prepare()
 	if (settings.overlay) {
 		UIOverlay.device = vulkanDevice;
 		UIOverlay.queue = queue;
-		UIOverlay.setFrameCount(getFrameCount());
+		UIOverlay.setFrameCount(maxConcurrentFrames);
 		UIOverlay.shaders = {
 			loadShader(getAssetPath() + "shaders/base/uioverlay.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
 			loadShader(getAssetPath() + "shaders/base/uioverlay.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT),
@@ -650,11 +602,18 @@ void VulkanExampleBase::drawUI(const VkCommandBuffer commandBuffer)
 
 void VulkanExampleBase::prepareFrame()
 {
+	// Ensure command buffer execution has finished
+	VK_CHECK_RESULT(vkWaitForFences(device, 1, &waitFences[currentBuffer], VK_TRUE, UINT64_MAX));
+	VK_CHECK_RESULT(vkResetFences(device, 1, &waitFences[currentBuffer]));
 	// Acquire the next image from the swap chain
-	VkResult result = swapChain.acquireNextImage(semaphores.presentComplete, &currentBuffer);
-	// Recreate the swapchain if it's no longer compatible with the surface (OUT_OF_DATE) or no longer optimal for presentation (SUBOPTIMAL)
+	VkResult result = swapChain.acquireNextImage(presentCompleteSemaphores[currentBuffer], currentImageIndex);
+	// Recreate the swapchain if it's no longer compatible with the surface (OUT_OF_DATE)
+	// If no longer optimal (VK_SUBOPTIMAL_KHR), wait until submitFrame() in case number of swapchain images will change on resize
 	if ((result == VK_ERROR_OUT_OF_DATE_KHR) || (result == VK_SUBOPTIMAL_KHR)) {
-		windowResize();
+		if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+			windowResize();
+		}
+		return;
 	}
 	else {
 		VK_CHECK_RESULT(result);
@@ -663,17 +622,40 @@ void VulkanExampleBase::prepareFrame()
 
 void VulkanExampleBase::submitFrame()
 {
-	VkResult result = swapChain.queuePresent(queue, currentBuffer, semaphores.renderComplete);
-	if (!((result == VK_SUCCESS) || (result == VK_SUBOPTIMAL_KHR))) {
+	const VkPipelineStageFlags waitPipelineStage{ VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+	VkSubmitInfo submitInfo{
+		.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &presentCompleteSemaphores[currentBuffer],
+		.pWaitDstStageMask = &waitPipelineStage,
+		.commandBufferCount = 1,
+		.pCommandBuffers = &commandBuffers[currentBuffer]->handle,
+		.signalSemaphoreCount = 1,
+		.pSignalSemaphores = &renderCompleteSemaphores[currentImageIndex]
+	};
+	VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, waitFences[currentBuffer]));
+
+	VkPresentInfoKHR presentInfo{
+		.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+		.waitSemaphoreCount = 1,
+		.pWaitSemaphores = &renderCompleteSemaphores[currentImageIndex],
+		.swapchainCount = 1,
+		.pSwapchains = &swapChain.swapChain,
+		.pImageIndices = &currentImageIndex
+	};
+	VkResult result = vkQueuePresentKHR(queue, &presentInfo);
+	// Recreate the swapchain if it's no longer compatible with the surface (OUT_OF_DATE) or no longer optimal for presentation (SUBOPTIMAL)
+	if ((result == VK_ERROR_OUT_OF_DATE_KHR) || (result == VK_SUBOPTIMAL_KHR)) {
+		windowResize();
 		if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-			// Swap chain is no longer compatible with the surface and needs to be recreated
-			windowResize();
 			return;
-		} else {
-			VK_CHECK_RESULT(result);
 		}
 	}
-	VK_CHECK_RESULT(vkQueueWaitIdle(queue));
+	else {
+		VK_CHECK_RESULT(result);
+	}
+	// Select the next frame to render to, based on the max. no. of concurrent frames
+	currentBuffer = (currentBuffer + 1) % maxConcurrentFrames;
 }
 
 VulkanExampleBase::VulkanExampleBase(bool enableValidation)
@@ -808,11 +790,14 @@ VulkanExampleBase::~VulkanExampleBase()
 		vkDestroyImageView(device, multisampleTarget.depth.view, nullptr);
 		vkFreeMemory(device, multisampleTarget.depth.memory, nullptr);
 	}
-
-	vkDestroySemaphore(device, semaphores.presentComplete, nullptr);
-	vkDestroySemaphore(device, semaphores.renderComplete, nullptr);
 	for (auto& fence : waitFences) {
 		vkDestroyFence(device, fence, nullptr);
+	}
+	for (auto& semaphore : presentCompleteSemaphores) {
+		vkDestroySemaphore(device, semaphore, nullptr);
+	}
+	for (auto& semaphore : renderCompleteSemaphores) {
+		vkDestroySemaphore(device, semaphore, nullptr);
 	}
 
 	if (settings.overlay) {
@@ -978,25 +963,6 @@ bool VulkanExampleBase::initVulkan()
 	assert(validDepthFormat);
 
 	swapChain.connect(instance, physicalDevice, device);
-
-	// Create synchronization objects
-	VkSemaphoreCreateInfo semaphoreCreateInfo = vks::initializers::semaphoreCreateInfo();
-	// Create a semaphore used to synchronize image presentation
-	// Ensures that the image is displayed before we start submitting new commands to the queu
-	VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &semaphores.presentComplete));
-	// Create a semaphore used to synchronize command submission
-	// Ensures that the image is not presented until all commands have been sumbitted and executed
-	VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &semaphores.renderComplete));
-
-	// Set up submit info structure
-	// Semaphores will stay the same during application lifetime
-	// Command buffer submission info is set by each example
-	submitInfo = vks::initializers::submitInfo();
-	submitInfo.pWaitDstStageMask = &submitPipelineStages;
-	submitInfo.waitSemaphoreCount = 1;
-	submitInfo.pWaitSemaphores = &semaphores.presentComplete;
-	submitInfo.signalSemaphoreCount = 1;
-	submitInfo.pSignalSemaphores = &semaphores.renderComplete;
 
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
 	// Get Android device name and manufacturer (to display along GPU name)
@@ -2023,10 +1989,20 @@ void VulkanExampleBase::buildCommandBuffers() {}
 void VulkanExampleBase::createSynchronizationPrimitives()
 {
 	// Wait fences to sync command buffer access
-	VkFenceCreateInfo fenceCreateInfo = vks::initializers::fenceCreateInfo(VK_FENCE_CREATE_SIGNALED_BIT);
-	waitFences.resize(commandBuffers.size());
+	VkFenceCreateInfo fenceCreateInfo{ .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT };
 	for (auto& fence : waitFences) {
 		VK_CHECK_RESULT(vkCreateFence(device, &fenceCreateInfo, nullptr, &fence));
+	}
+	// Used to ensure that image presentation is complete before starting to submit again
+	for (auto& semaphore : presentCompleteSemaphores) {
+		VkSemaphoreCreateInfo semaphoreCI{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+		VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCI, nullptr, &semaphore));
+	}
+	// Semaphore used to ensure that all commands submitted have been finished before submitting the image to the queue
+	renderCompleteSemaphores.resize(swapChain.images.size());
+	for (auto& semaphore : renderCompleteSemaphores) {
+		VkSemaphoreCreateInfo semaphoreCI{ .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+		VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCI, nullptr, &semaphore));
 	}
 }
 
@@ -2227,7 +2203,7 @@ void VulkanExampleBase::handleMouseMove(int32_t x, int32_t y)
 
 	bool handled = false;
 
-	if (settings.overlay) {
+	if (settings.overlay && UIOverlay.visible) {
 		ImGuiIO& io = ImGui::GetIO();
 		handled = io.WantCaptureMouse;
 	}
@@ -2286,102 +2262,6 @@ void VulkanExampleBase::setupSwapChain()
 }
 
 void VulkanExampleBase::OnUpdateUIOverlay(vks::UIOverlay *overlay) {}
-
-void VulkanExampleBase::prepareFrame(VulkanFrameObjects& frame)
-{
-
-	// Ensure command buffer execution has finished
-	VK_CHECK_RESULT(vkWaitForFences(device, 1, &frame.renderCompleteFence, VK_TRUE, UINT64_MAX));
-	VK_CHECK_RESULT(vkResetFences(device, 1, &frame.renderCompleteFence));
-	// Acquire the next image from the swap chain
-	VkResult result = swapChain.acquireNextImage(frame.presentCompleteSemaphore, &currentBuffer);
-	// @todo: rework after removing currentBuffer
-	swapChain.currentImageIndex = currentBuffer;
-	// Recreate the swapchain if it's no longer compatible with the surface (OUT_OF_DATE) or no longer optimal for presentation (SUBOPTIMAL)
-	if ((result == VK_ERROR_OUT_OF_DATE_KHR) || (result == VK_SUBOPTIMAL_KHR)) {
-		windowResize();
-	}
-	else {
-		VK_CHECK_RESULT(result);
-	}
-	//	 @todo: check if ui overlay needs to be updated
-		//if (settings.overlay) {
-		//	updateOverlay();
-		//	if (UIOverlay.bufferUpdateRequired()) {
-		//		std::cout << "UI buffers need to be recreated\n";
-		//		// Ensure all command buffers have finished execution, so we don't change vertex and/or index buffers still in use
-		//		// @todo: wait for fences instead?
-		//		//vkQueueWaitIdle(queue);
-		//		UIOverlay.allocateBuffers();
-		//	}
-		//	// @todo: cap update rate
-		//	UIOverlay.updateBuffers();
-		//}
-}
-
-void VulkanExampleBase::submitFrame(VulkanFrameObjects& frame)
-{
-	// Submit command buffer to queue
-	VkPipelineStageFlags submitWaitStages = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	submitInfo = vks::initializers::submitInfo();
-	submitInfo.pWaitDstStageMask = &submitWaitStages;
-	submitInfo.waitSemaphoreCount = 1;
-	submitInfo.pWaitSemaphores = &frame.presentCompleteSemaphore;
-	submitInfo.signalSemaphoreCount = 1;
-	submitInfo.pSignalSemaphores = &frame.renderCompleteSemaphore;
-	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &frame.commandBuffer->handle;
-	VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, frame.renderCompleteFence));
-
-	// Present image to queue
-	VkResult result = swapChain.queuePresent(queue, currentBuffer, frame.renderCompleteSemaphore);
-	if (!((result == VK_SUCCESS) || (result == VK_SUBOPTIMAL_KHR))) {
-		if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-			// Swap chain is no longer compatible with the surface and needs to be recreated
-			windowResize();
-			return;
-		}
-		else {
-			VK_CHECK_RESULT(result);
-		}
-	}
-
-	frameIndex++;
-	if (frameIndex >= renderAhead) {
-		frameIndex = 0;
-	}
-}
-
-uint32_t VulkanExampleBase::getFrameCount()
-{
-	return renderAhead;
-}
-
-uint32_t VulkanExampleBase::getCurrentFrameIndex()
-{
-	return frameIndex;
-}
-
-void VulkanExampleBase::createBaseFrameObjects(VulkanFrameObjects& frame)
-{
-	VkCommandBufferAllocateInfo cmdBufAllocateInfo = vks::initializers::commandBufferAllocateInfo(commandPool->handle, VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1);
-	frame.commandBuffer = new CommandBuffer(device);
-	frame.commandBuffer->setPool(commandPool);
-	frame.commandBuffer->create();
-	//VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, &frame.commandBuffer));
-	VkFenceCreateInfo fenceCreateInfo = vks::initializers::fenceCreateInfo(VK_FENCE_CREATE_SIGNALED_BIT);
-	VK_CHECK_RESULT(vkCreateFence(device, &fenceCreateInfo, nullptr, &frame.renderCompleteFence));
-	VkSemaphoreCreateInfo semaphoreCreateInfo = vks::initializers::semaphoreCreateInfo();
-	VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frame.presentCompleteSemaphore));
-	VK_CHECK_RESULT(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frame.renderCompleteSemaphore));
-}
-
-void VulkanExampleBase::destroyBaseFrameObjects(VulkanFrameObjects& frame)
-{
-	vkDestroyFence(device, frame.renderCompleteFence, nullptr);
-	vkDestroySemaphore(device, frame.presentCompleteSemaphore, nullptr);
-	vkDestroySemaphore(device, frame.renderCompleteSemaphore, nullptr);
-}
 
 void VulkanExampleBase::nextFrame()
 {

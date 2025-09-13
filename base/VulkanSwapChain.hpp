@@ -3,7 +3,7 @@
 * 
 * A swap chain is a collection of framebuffers used for rendering and presentation to the windowing system
 *
-* Copyright (C) 2016-2017 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2016-2025 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -75,7 +75,6 @@ public:
 	std::vector<SwapChainBuffer> buffers;
 	/** @brief Queue family index of the detected graphics and presenting device queue */
 	uint32_t queueNodeIndex = UINT32_MAX;
-	uint32_t currentImageIndex = 0;
 
 	/** @brief Creates the platform specific surface abstraction of the native platform window used for presentation */	
 #if defined(VK_USE_PLATFORM_WIN32_KHR)
@@ -211,22 +210,41 @@ public:
 		VK_CHECK_RESULT(fpGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, NULL));
 		assert(formatCount > 0);
 
-		std::vector<VkSurfaceFormatKHR> surfaceFormats(formatCount);
-		VK_CHECK_RESULT(fpGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, surfaceFormats.data()));
+		std::vector<VkSurfaceFormatKHR> deviceSurfaceFormats(formatCount);
+		VK_CHECK_RESULT(fpGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, deviceSurfaceFormats.data()));
 
+#if defined(SRGB)
+		// We'll try to select a sRGB surface format and colorspace
+		std::vector<VkSurfaceFormatKHR> surfaceFormatList = {
+			{VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
+			{VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}
+		};
+
+		bool preferredSurfaceFormatFound = false;
+		for (auto& surfaceFormat : surfaceFormatList) {
+			for (auto& deviceSurfaceFormat : deviceSurfaceFormats) {
+				if (deviceSurfaceFormat.format == surfaceFormat.format && deviceSurfaceFormat.colorSpace == surfaceFormat.colorSpace) {
+					colorFormat = surfaceFormat.format;
+					colorSpace = surfaceFormat.colorSpace;
+					preferredSurfaceFormatFound = true;
+					break;
+				}
+			}
+		}
+#else
 		// If the surface format list only includes one entry with VK_FORMAT_UNDEFINED,
 		// there is no preferered format, so we assume VK_FORMAT_B8G8R8A8_UNORM
-		if ((formatCount == 1) && (surfaceFormats[0].format == VK_FORMAT_UNDEFINED))
+		if ((formatCount == 1) && (deviceSurfaceFormats[0].format == VK_FORMAT_UNDEFINED))
 		{
 			colorFormat = VK_FORMAT_B8G8R8A8_UNORM;
-			colorSpace = surfaceFormats[0].colorSpace;
+			colorSpace = deviceSurfaceFormats[0].colorSpace;
 		}
 		else
 		{
 			// iterate over the list of available surface format and
 			// check for the presence of VK_FORMAT_B8G8R8A8_UNORM
 			bool found_B8G8R8A8_UNORM = false;
-			for (auto&& surfaceFormat : surfaceFormats)
+			for (auto&& surfaceFormat : deviceSurfaceFormats)
 			{
 				if (surfaceFormat.format == VK_FORMAT_B8G8R8A8_SRGB)
 				{
@@ -249,10 +267,11 @@ public:
 			// select the first available color format
 			if (!found_B8G8R8A8_UNORM)
 			{
-				colorFormat = surfaceFormats[0].format;
-				colorSpace = surfaceFormats[0].colorSpace;
+				colorFormat = deviceSurfaceFormats[0].format;
+				colorSpace = deviceSurfaceFormats[0].colorSpace;
 			}
 		}
+#endif
 
 	}
 
@@ -468,11 +487,11 @@ public:
 	*
 	* @return VkResult of the image acquisition
 	*/
-	VkResult acquireNextImage(VkSemaphore presentCompleteSemaphore, uint32_t *imageIndex)
+	VkResult acquireNextImage(VkSemaphore presentCompleteSemaphore, uint32_t& imageIndex)
 	{
 		// By setting timeout to UINT64_MAX we will always wait until the next image has been acquired or an actual error is thrown
 		// With that we don't have to handle VK_NOT_READY
-		return fpAcquireNextImageKHR(device, swapChain, UINT64_MAX, presentCompleteSemaphore, (VkFence)nullptr, imageIndex);
+		return fpAcquireNextImageKHR(device, swapChain, UINT64_MAX, presentCompleteSemaphore, (VkFence)nullptr, &imageIndex);
 	}
 
 	/**
