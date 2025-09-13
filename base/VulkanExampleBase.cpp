@@ -154,9 +154,11 @@ void VulkanExampleBase::prepare()
 	setupImages();
 	settings.overlay = settings.overlay && (!benchmark.active);
 	if (settings.overlay) {
+		UIOverlay.rasterizationSamples = settings.sampleCount;
+		UIOverlay.fontFile = getAssetPath() + "Roboto-Medium.ttf";
+		UIOverlay.maxConcurrentFrames = maxConcurrentFrames;
 		UIOverlay.device = vulkanDevice;
 		UIOverlay.queue = queue;
-		UIOverlay.setFrameCount(maxConcurrentFrames);
 		UIOverlay.shaders = {
 			loadShader(getAssetPath() + "shaders/base/uioverlay.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
 			loadShader(getAssetPath() + "shaders/base/uioverlay.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT),
@@ -562,24 +564,7 @@ void VulkanExampleBase::updateOverlay(uint32_t frameIndex)
 	//ImGui::PopStyleVar();
 	ImGui::Render();
 
-	//Check if the overlay's index and vertex buffers needs to be updated (recreated), e.g. because new elements are visible and indices or vertices require additional buffer space
-   //@todo: remove?
-	if (settings.overlay) {
-		if (UIOverlay.bufferUpdateRequired(frameIndex)) {
-			std::cout << "UI buffers need to be recreated\n";
-			// Ensure all command buffers have finished execution, so we don't change vertex and/or index buffers still in use
-			// @todo: wait for fences instead?
-			vkQueueWaitIdle(queue);
-			UIOverlay.allocateBuffers(frameIndex);
-		}
-		// @todo: cap update rate
-		UIOverlay.updateBuffers(frameIndex);
-	}
-
-	//if (UIOverlay.update() || UIOverlay.updated) {
-	//	buildCommandBuffers();
-	//	UIOverlay.updated = false;
-	//}
+	UIOverlay.update(currentBuffer);
 
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
 	if (mouseButtons.left) {
@@ -658,7 +643,7 @@ void VulkanExampleBase::submitFrame()
 	currentBuffer = (currentBuffer + 1) % maxConcurrentFrames;
 }
 
-VulkanExampleBase::VulkanExampleBase(bool enableValidation)
+VulkanExampleBase::VulkanExampleBase()
 {
 #if !defined(VK_USE_PLATFORM_ANDROID_KHR)
 	// Check for a valid asset path
@@ -674,8 +659,6 @@ VulkanExampleBase::VulkanExampleBase(bool enableValidation)
 		exit(-1);
 	}
 #endif
-
-	settings.validation = enableValidation;
 
 	char* numConvPtr;
 
@@ -2319,5 +2302,4 @@ void VulkanExampleBase::nextFrame()
 		frameCounter = 0;
 		lastTimestamp = tEnd;
 	}
-	UIOverlay.updated = false;
 }
