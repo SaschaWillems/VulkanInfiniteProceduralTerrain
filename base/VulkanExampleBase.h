@@ -1,7 +1,7 @@
 /*
 * Vulkan Example base class
 *
-* Copyright (C) 2016-2025 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2016-2026 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -255,6 +255,8 @@ public:
 
 	// Setup the vulkan instance, enable required extensions and connect to the physical device (GPU)
 	bool initVulkan();
+
+	uint32_t getCurrentFrameIndex();
 
 #if defined(_WIN32)
 	void setupConsole(std::string title);

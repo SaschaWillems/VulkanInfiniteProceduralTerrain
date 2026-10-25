@@ -2,7 +2,7 @@
 /*
 * Vulkan Example base class
 *
-* Copyright (C) 2016-2025 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2016-2026 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -963,6 +963,11 @@ bool VulkanExampleBase::initVulkan()
 #endif	
 
 	return true;
+}
+
+uint32_t VulkanExampleBase::getCurrentFrameIndex()
+{
+	return currentImageIndex;
 }
 
 #if defined(_WIN32)

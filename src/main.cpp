@@ -306,6 +306,8 @@ public:
 	int32_t presetIndex = 0;
 	int32_t terrainSetIndex = 0;
 
+	PFN_vkSetDebugUtilsObjectNameEXT vkSetDebugUtilsObjectNameEXT = VK_NULL_HANDLE;
+
 	inline float goldNoise(glm::vec2 xy, float seed) {
 		const float PHI = 1.61803398874989484820459f;
 		float ip;
@@ -430,7 +432,7 @@ public:
 				float r = 0.0f;
 				worldPos.x += rndVal;// *2.0f - rndValB * 2.0f;
 				worldPos.z -= rndVal;// *2.0f - rndValB * 2.0f;
-				infiniteTerrain.getHeightAndRandomValue(worldPos, h, r);
+				infiniteTerrain.getHeight(worldPos, worldPos.y);
 				if ((abs(h) <= heightMapSettings.waterPosition) || (abs(h) > 12.0f)) {
 					continue;
 				}
@@ -578,7 +580,7 @@ public:
 	}
 
 
-	VulkanExample() : VulkanExampleBase(ENABLE_VALIDATION)
+	VulkanExample() : VulkanExampleBase()
 	{
 		title = "Vulkan infinite terrain";
 		camera.type = Camera::CameraType::firstperson;
